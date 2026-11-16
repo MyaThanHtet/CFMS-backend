@@ -1,0 +1,457 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String    @id
+  email         String    @unique
+  name          String
+  passwordHash  String?
+  googleSubject String?   @unique
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  sessions      Session[]
+  ownedStores   Store[]       @relation("StoreOwner")
+  memberships   StoreMember[]
+
+  @@map("users")
+}
+
+model Session {
+  id               String    @id
+  userId           String
+  refreshTokenHash String    @unique
+  deviceId         String
+  deviceName       String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Store {
+  id           String         @id
+  name         String
+  address      String?
+  phone        String?
+  email        String?
+  currencyCode   String         @default("MMK")
+  currencySymbol String       @default("Ks")
+  taxName        String       @default("Commercial tax")
+  taxRatePercent Int          @default(0)
+  timezone       String       @default("Asia/Yangon")
+  revision       Int          @default(1)
+  ownerId        String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  owner        User           @relation("StoreOwner", fields: [ownerId], references: [id])
+  members      StoreMember[]
+  categories   Category[]
+  contacts     Contact[]
+  units        Unit[]
+  items        Item[]
+  movements    StockMovement[]
+  batches      CostBatch[]
+  expenses     Expense[]
+  cashAccounts CashAccount[]
+  cashMovements CashMovement[]
+  reconciliations CashReconciliation[]
+  sales        SaleDocument[]
+  purchases      PurchaseDocument[]
+  paymentMethods PaymentMethod[]
+  commands       CommandRecord[]
+  changes      ChangeRecord[]
+  sequence     StoreSequence?
+  cursors      SyncCursor[]
+
+  @@index([ownerId])
+  @@map("stores")
+}
+
+model PaymentMethod {
+  id             String   @id
+  storeId        String
+  name           String
+  normalizedName String
+  accountId      String
+  isDefault      Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  revision       Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("payment_methods")
+}
+
+model StoreMember {
+  storeId   String
+  userId    String
+  role      String
+  createdAt DateTime @default(now())
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, userId])
+  @@index([userId])
+  @@map("store_members")
+}
+
+model Category {
+  id             String   @id
+  storeId        String
+  kind           String
+  name           String
+  normalizedName String
+  description    String   @default("")
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  revision       Int
+  createdBy      String
+  updatedBy      String
+  deviceId       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, kind, normalizedName])
+  @@index([storeId, kind, sortOrder])
+  @@map("categories")
+}
+
+model Contact {
+  id                      String   @id
+  storeId                 String
+  contactType             String
+  name                    String
+  normalizedName          String
+  categoryId              String?
+  categoryName            String?
+  phone                   String   @default("")
+  email                   String   @default("")
+  address                 String   @default("")
+  openingReceivableMinor  Int      @default(0)
+  openingPayableMinor     Int      @default(0)
+  collectedMinor          Int      @default(0)
+  paidMinor               Int      @default(0)
+  receivableMinor         Int      @default(0)
+  payableMinor            Int      @default(0)
+  receivableAsOf          String?
+  receivableNote          String   @default("")
+  payableAsOf             String?
+  payableNote             String   @default("")
+  settlements             Json     @default("[]")
+  isActive                Boolean  @default(true)
+  revision                Int
+  createdBy               String
+  updatedBy               String
+  deviceId                String
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  store                   Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, contactType, isActive])
+  @@map("contacts")
+}
+
+model Unit {
+  id             String   @id
+  storeId        String
+  name           String
+  normalizedName String
+  isActive       Boolean  @default(true)
+  revision       Int
+  createdBy      String
+  updatedBy      String
+  deviceId       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, normalizedName])
+  @@map("units")
+}
+
+model Item {
+  id                String   @id
+  storeId           String
+  itemType          String
+  name              String
+  normalizedName    String
+  sku               String   @default("")
+  normalizedSku     String   @default("")
+  unitId            String?
+  unitName          String?
+  categoryId        String?
+  categoryName      String?
+  salePriceMinor    Int
+  purchaseCostMinor Int?
+  stockQty          Int?
+  lowStockLevel     Int?
+  isActive          Boolean  @default(true)
+  revision          Int
+  createdBy         String
+  updatedBy         String
+  deviceId          String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  store             Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, itemType, isActive])
+  @@map("items")
+}
+
+model StockMovement {
+  id               String   @id
+  storeId          String
+  itemId           String
+  movementType     String
+  quantityChange   Int
+  onHandAfter      Int
+  reference        String
+  occurredAt       String
+  actorName        String
+  status           String
+  revision         Int
+  createdAt        DateTime @default(now())
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, itemId])
+  @@map("stock_movements")
+}
+
+model CostBatch {
+  id               String   @id
+  storeId          String
+  itemId           String
+  receivedOn       String
+  source           String
+  sourceReference  String
+  unitCostMinor    Int
+  receivedQty      Int
+  remainingQty     Int
+  revision         Int
+  createdAt        DateTime @default(now())
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, itemId, receivedOn])
+  @@map("cost_batches")
+}
+
+model Expense {
+  id                String   @id
+  storeId           String
+  title             String
+  categoryId        String?
+  categoryName      String?
+  amountMinor       Int
+  accountName       String
+  paymentMethodName String
+  effectiveDate     String
+  note              String   @default("")
+  status            String
+  actorName         String
+  isActive          Boolean  @default(true)
+  revision          Int
+  createdBy         String
+  updatedBy         String
+  deviceId          String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  store             Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, effectiveDate])
+  @@map("expenses")
+}
+
+model CashAccount {
+  id             String   @id
+  storeId        String
+  name           String
+  normalizedName String
+  accountType    String
+  openingMinor   Int
+  isActive       Boolean  @default(true)
+  revision       Int
+  createdBy      String
+  updatedBy      String
+  deviceId       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, normalizedName])
+  @@map("cash_accounts")
+}
+
+model CashMovement {
+  id                 String   @id
+  storeId            String
+  accountId          String
+  direction          String
+  amountMinor        Int
+  source             String
+  description        String
+  sourceReference    String   @default("")
+  occurredAt         String
+  effectiveDate      String
+  categoryId         String?
+  categoryName       String?
+  paymentMethodName  String   @default("")
+  note               String   @default("")
+  linkedExpenseId    String?
+  transferGroupId    String?
+  status             String
+  revision           Int
+  createdAt          DateTime @default(now())
+  store              Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, accountId])
+  @@map("cash_movements")
+}
+
+model CashReconciliation {
+  id                  String   @id
+  storeId             String
+  accountId           String
+  cutoffAt            String
+  systemBalanceMinor  Int
+  countedMinor        Int
+  note                String   @default("")
+  revision            Int
+  createdBy           String
+  deviceId            String
+  createdAt           DateTime @default(now())
+  store               Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, accountId])
+  @@map("cash_reconciliations")
+}
+
+model SaleDocument {
+  id               String   @id
+  storeId          String
+  number           String
+  normalizedNumber String
+  contactName      String
+  effectiveDate    String
+  occurredAt       String
+  grossMinor       Int
+  discountMinor    Int
+  taxMinor         Int
+  deliveryMinor    Int
+  netMinor         Int
+  costMinor        Int
+  receivedMinor    Int
+  dueMinor         Int
+  note             String   @default("")
+  isActive         Boolean  @default(true)
+  revision         Int
+  lines            Json
+  payments         Json
+  returns          Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, normalizedNumber])
+  @@map("sale_documents")
+}
+
+model PurchaseDocument {
+  id               String   @id
+  storeId          String
+  number           String
+  normalizedNumber String
+  supplierName     String
+  effectiveDate    String
+  occurredAt       String
+  grossMinor       Int
+  discountMinor    Int
+  taxMinor         Int
+  shippingMinor    Int
+  netMinor         Int
+  paidMinor        Int
+  dueMinor         Int
+  note             String   @default("")
+  isActive         Boolean  @default(true)
+  revision         Int
+  lines            Json
+  payments         Json
+  returns          Json
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  store            Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, normalizedNumber])
+  @@map("purchase_documents")
+}
+
+model CommandRecord {
+  id              String   @id
+  storeId         String
+  deviceId        String
+  actorUserId     String
+  type            String
+  payload         Json
+  status          String
+  code            String?
+  message         String?
+  changeSequence  Int?
+  resultCategory  Json?
+  resultContact   Json?
+  resultItem      Json?
+  resultExpense   Json?
+  resultCash      Json?
+  resultSale      Json?
+  resultPurchase  Json?
+  resultShop      Json?
+  createdAt       DateTime @default(now())
+  store           Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId, createdAt])
+  @@map("commands")
+}
+
+model ChangeRecord {
+  storeId        String
+  sequence       Int
+  aggregateType  String
+  aggregateId    String
+  type           String
+  commandId      String
+  payload        Json
+  createdAt      DateTime @default(now())
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, sequence])
+  @@map("changes")
+}
+
+model StoreSequence {
+  storeId      String @id
+  lastSequence Int    @default(0)
+  store        Store  @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@map("store_sequences")
+}
+
+model SyncCursor {
+  storeId      String
+  deviceId     String
+  lastSequence Int      @default(0)
+  updatedAt    DateTime @updatedAt
+  store        Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@id([storeId, deviceId])
+  @@map("sync_cursors")
+}
