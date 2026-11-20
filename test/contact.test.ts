@@ -13,6 +13,7 @@ describe('contacts', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog,
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},
@@ -26,9 +27,11 @@ describe('contacts', () => {
       headers: { authorization: 'Bearer owner' },
       payload: { id: storeId, name: 'Morning Star', deviceId: 'device-1' },
     });
-    const categoryId = createdShop.json().categories.find(
-      (category: { kind: string; name: string }) => category.kind === 'CONTACT' && category.name === 'Customer',
-    ).id as string;
+    const categoryId = createdShop
+      .json()
+      .categories.find(
+        (category: { kind: string; name: string }) => category.kind === 'CONTACT' && category.name === 'Customer',
+      ).id as string;
     const contactId = randomUUID();
     const createId = randomUUID();
     const createPayload = {
@@ -107,7 +110,12 @@ describe('contacts', () => {
             storeId,
             deviceId: 'device-1',
             type: 'contact.set_opening_balance',
-            payload: { id: contactId, baseRevision: 2, amountMinor: 50000, effectiveDate: '2026-02-31' },
+            payload: {
+              id: contactId,
+              baseRevision: 2,
+              amountMinor: 50000,
+              effectiveDate: '2026-02-31',
+            },
           },
         ],
       },

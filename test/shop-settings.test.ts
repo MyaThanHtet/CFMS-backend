@@ -11,6 +11,7 @@ describe('shop settings', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog: new CatalogService(new MemoryCatalogRepository()),
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},
@@ -83,7 +84,14 @@ describe('shop settings', () => {
             storeId,
             deviceId: 'device-1',
             type: 'store.tax',
-            payload: { taxName: 'Commercial tax', currencySymbol: 'Ks', taxRatePercent: 5, currencyCode: 'MMK', decimalPlaces: 0, baseRevision: 2 },
+            payload: {
+              taxName: 'Commercial tax',
+              currencySymbol: 'Ks',
+              taxRatePercent: 5,
+              currencyCode: 'MMK',
+              decimalPlaces: 0,
+              baseRevision: 2,
+            },
           },
         ],
       },
@@ -101,7 +109,12 @@ describe('shop settings', () => {
             storeId,
             deviceId: 'device-1',
             type: 'store.tax',
-            payload: { taxName: 'Commercial tax', currencySymbol: 'Ks', taxRatePercent: 150, baseRevision: 3 },
+            payload: {
+              taxName: 'Commercial tax',
+              currencySymbol: 'Ks',
+              taxRatePercent: 150,
+              baseRevision: 3,
+            },
           },
         ],
       },
@@ -120,12 +133,20 @@ describe('shop settings', () => {
             storeId,
             deviceId: 'device-1',
             type: 'paymentMethod.create',
-            payload: { id: methodId, name: 'KBZPay', accountId: drawerId, isDefault: false },
+            payload: {
+              id: methodId,
+              name: 'KBZPay',
+              accountId: drawerId,
+              isDefault: false,
+            },
           },
         ],
       },
     });
-    const methods = added.json().results[0].paymentMethods as Array<{ name: string; isDefault: boolean }>;
+    const methods = added.json().results[0].paymentMethods as Array<{
+      name: string;
+      isDefault: boolean;
+    }>;
     assert.equal(methods.length, 2);
     assert.equal(methods.find((method) => method.name === 'Cash')?.isDefault, true);
     assert.equal(methods.find((method) => method.name === 'KBZPay')?.isDefault, false);
@@ -141,7 +162,12 @@ describe('shop settings', () => {
             storeId,
             deviceId: 'device-1',
             type: 'paymentMethod.create',
-            payload: { id: randomUUID(), name: 'cash', accountId: drawerId, isDefault: false },
+            payload: {
+              id: randomUUID(),
+              name: 'cash',
+              accountId: drawerId,
+              isDefault: false,
+            },
           },
         ],
       },
@@ -159,12 +185,21 @@ describe('shop settings', () => {
             storeId,
             deviceId: 'device-1',
             type: 'paymentMethod.update',
-            payload: { id: methodId, name: 'KBZPay', accountId: drawerId, isDefault: true, baseRevision: 1 },
+            payload: {
+              id: methodId,
+              name: 'KBZPay',
+              accountId: drawerId,
+              isDefault: true,
+              baseRevision: 1,
+            },
           },
         ],
       },
     });
-    const next = promoted.json().results[0].paymentMethods as Array<{ name: string; isDefault: boolean }>;
+    const next = promoted.json().results[0].paymentMethods as Array<{
+      name: string;
+      isDefault: boolean;
+    }>;
     assert.equal(next.find((method) => method.name === 'KBZPay')?.isDefault, true);
     assert.equal(next.find((method) => method.name === 'Cash')?.isDefault, false);
 

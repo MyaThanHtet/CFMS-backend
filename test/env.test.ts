@@ -47,4 +47,20 @@ describe('loadEnv', () => {
       /JWT_ACCESS_SECRET/,
     );
   });
+  it('uses central authentication without a standalone CFMS JWT secret', () => {
+    const env = loadEnv({ DATABASE_URL: 'postgresql://cfms:cfms@localhost:5432/cfms' });
+    assert.equal(env.JWT_ACCESS_SECRET, undefined);
+    assert.equal(env.PORT, 4000);
+  });
+  it('requires HTTPS for the production ByteCraft issuer', () => {
+    assert.throws(
+      () =>
+        loadEnv({
+          NODE_ENV: 'production',
+          DATABASE_URL: 'postgresql://localhost/cfms',
+          BYTECRAFT_ISSUER: 'http://localhost:3000',
+        }),
+      /HTTPS/,
+    );
+  });
 });

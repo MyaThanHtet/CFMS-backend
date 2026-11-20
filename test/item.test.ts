@@ -11,6 +11,7 @@ describe('items', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog: new CatalogService(new MemoryCatalogRepository()),
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},
@@ -24,9 +25,11 @@ describe('items', () => {
       headers: { authorization: 'Bearer owner' },
       payload: { id: storeId, name: 'Morning Star', deviceId: 'device-1' },
     });
-    const categoryId = createdShop.json().categories.find(
-      (category: { kind: string; name: string }) => category.kind === 'ITEM' && category.name === 'Grocery',
-    ).id as string;
+    const categoryId = createdShop
+      .json()
+      .categories.find(
+        (category: { kind: string; name: string }) => category.kind === 'ITEM' && category.name === 'Grocery',
+      ).id as string;
     const unitId = randomUUID();
     const unit = await app.inject({
       method: 'POST',
@@ -156,7 +159,9 @@ describe('items', () => {
 });
 
 async function send(
-  app: { inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }> },
+  app: {
+    inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }>;
+  },
   storeId: string,
   type: string,
   payload: Record<string, unknown>,

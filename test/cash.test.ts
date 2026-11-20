@@ -11,6 +11,7 @@ describe('cash', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog: new CatalogService(new MemoryCatalogRepository()),
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},
@@ -159,21 +160,23 @@ describe('cash', () => {
       url: '/v1/commands',
       headers: { authorization: 'Bearer stranger' },
       payload: {
-        commands: [{
-          id: randomUUID(),
-          storeId,
-          deviceId: 'device-2',
-          type: 'cash.in',
-          payload: {
+        commands: [
+          {
             id: randomUUID(),
-            movementId: randomUUID(),
-            accountId: drawer.id,
-            title: 'Nope',
-            amountMinor: 1,
-            paymentMethodName: 'Cash',
-            effectiveDate: '2026-11-14',
+            storeId,
+            deviceId: 'device-2',
+            type: 'cash.in',
+            payload: {
+              id: randomUUID(),
+              movementId: randomUUID(),
+              accountId: drawer.id,
+              title: 'Nope',
+              amountMinor: 1,
+              paymentMethodName: 'Cash',
+              effectiveDate: '2026-11-14',
+            },
           },
-        }],
+        ],
       },
     });
     assert.equal(outsider.statusCode, 403);
@@ -181,17 +184,34 @@ describe('cash', () => {
   });
 });
 
-function balance(snapshot: {
-  accounts: Array<{ id: string; name: string }>;
-  cashMovements: Array<{ accountId: string; direction: string; amountMinor: number; status: string; linkedExpenseId: string | null }>;
-  expenses: Array<{ id: string; accountName: string; amountMinor: number; status: string; isActive: boolean }>;
-}, name: string): number {
+function balance(
+  snapshot: {
+    accounts: Array<{ id: string; name: string }>;
+    cashMovements: Array<{
+      accountId: string;
+      direction: string;
+      amountMinor: number;
+      status: string;
+      linkedExpenseId: string | null;
+    }>;
+    expenses: Array<{
+      id: string;
+      accountName: string;
+      amountMinor: number;
+      status: string;
+      isActive: boolean;
+    }>;
+  },
+  name: string,
+): number {
   const account = snapshot.accounts.find((row) => row.name === name);
   if (!account) {
     return 0;
   }
   const linked = new Set(
-    snapshot.cashMovements.filter((row) => row.status === 'ACTIVE' && row.linkedExpenseId).map((row) => row.linkedExpenseId),
+    snapshot.cashMovements
+      .filter((row) => row.status === 'ACTIVE' && row.linkedExpenseId)
+      .map((row) => row.linkedExpenseId),
   );
   let total = 0;
   for (const row of snapshot.cashMovements) {
@@ -210,7 +230,9 @@ function balance(snapshot: {
 }
 
 async function send(
-  app: { inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }> },
+  app: {
+    inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }>;
+  },
   storeId: string,
   type: string,
   payload: Record<string, unknown>,

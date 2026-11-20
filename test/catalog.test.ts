@@ -94,7 +94,12 @@ describe('category sync', () => {
           storeId,
           deviceId,
           type: 'category.create',
-          payload: { id: categoryId, kind: 'ITEM', name: ' Fresh   food ', description: 'Vegetables' },
+          payload: {
+            id: categoryId,
+            kind: 'ITEM',
+            name: ' Fresh   food ',
+            description: 'Vegetables',
+          },
         },
       ],
     };
@@ -130,7 +135,12 @@ describe('category sync', () => {
             storeId,
             deviceId,
             type: 'category.create',
-            payload: { id: randomUUID(), kind: 'ITEM', name: 'fresh food', description: '' },
+            payload: {
+              id: randomUUID(),
+              kind: 'ITEM',
+              name: 'fresh food',
+              description: '',
+            },
           },
         ],
       },
@@ -205,6 +215,7 @@ function buildApp() {
   const app = createApp(
     {
       checkHealth: new CheckHealth({ ping: async () => true }),
+      cloudAccess: { requireCloud: async () => {} },
       catalog,
       accessTokens: {
         async verify(token: string): Promise<string> {
@@ -218,5 +229,9 @@ function buildApp() {
     },
     { logger: false },
   );
-  return { app, catalog: repository };
+  return {
+    app,
+    cloudAccess: { requireCloud: async () => {} },
+    catalog: repository,
+  };
 }

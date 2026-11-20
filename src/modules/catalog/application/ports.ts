@@ -30,6 +30,7 @@ export type StoreSnapshot = {
 };
 
 export type CreateStoreInput = {
+  seedDefaults?: boolean;
   id: string;
   name: string;
   address: string | null;
@@ -42,7 +43,8 @@ export type CreateStoreInput = {
 export type ChangeEntry = {
   sequence: number;
   storeId: string;
-  aggregateType: 'category' | 'contact' | 'unit' | 'item' | 'expense' | 'account' | 'sale' | 'purchase' | 'store' | 'paymentMethod';
+  aggregateType:
+    'category' | 'contact' | 'unit' | 'item' | 'expense' | 'account' | 'sale' | 'purchase' | 'store' | 'paymentMethod';
   aggregateId: string;
   type: string;
   commandId: string;
@@ -76,4 +78,41 @@ export interface CatalogRepository {
   snapshot(storeId: string): Promise<StoreSnapshot>;
   changes(storeId: string, after: number): Promise<{ changes: ChangeEntry[]; lastSequence: number }>;
   acknowledge(storeId: string, deviceId: string, sequence: number): Promise<void>;
+  listDevices(storeId: string): Promise<ShopDevice[]>;
+  revokeDevice(storeId: string, deviceId: string, now: Date): Promise<void>;
+  listCommands(storeId: string): Promise<ShopCommand[]>;
+  listMembers(storeId: string): Promise<ShopMember[]>;
+  inviteMember(storeId: string, actorUserId: string, input: InviteMemberInput): Promise<ShopMember>;
 }
+
+export type ShopMember = {
+  userId: string;
+  name: string;
+  email: string;
+  role: 'OWNER' | 'MANAGER' | 'CASHIER';
+  status: 'ACTIVE';
+};
+
+export type InviteMemberInput = {
+  email: string;
+  role: 'MANAGER' | 'CASHIER';
+  password: string;
+};
+
+export type ShopDevice = {
+  deviceId: string;
+  deviceName: string;
+  memberName: string;
+  lastSeenAt: string;
+};
+
+export type ShopCommand = {
+  id: string;
+  type: string;
+  deviceId: string;
+  deviceName: string;
+  status: string;
+  message: string | null;
+  createdAt: string;
+  label: string;
+};

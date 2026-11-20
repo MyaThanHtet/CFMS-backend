@@ -3,7 +3,7 @@ import { cashFlow, itemReport, profitAndLoss, purchaseReport, saleReport, stockV
 import { toReportSale } from '../domain/sale.js';
 import { toReportPurchase } from '../domain/purchase.js';
 import type { IncomingCommand, StoredCommand } from '../domain/category.js';
-import type { CatalogRepository, CreateStoreInput, StoreSnapshot } from './ports.js';
+import type { CatalogRepository, CreateStoreInput, InviteMemberInput, StoreSnapshot } from './ports.js';
 
 export class CatalogService {
   constructor(private readonly catalog: CatalogRepository) {}
@@ -62,6 +62,40 @@ export class CatalogService {
       await this.catalog.acknowledge(storeId, acknowledgement.deviceId, acknowledgement.sequence);
     }
     return page;
+  }
+
+  async devices(actorUserId: string, storeId: string) {
+    await this.requireMember(actorUserId, storeId);
+    return this.catalog.listDevices(storeId);
+  }
+
+  async revokeDevice(actorUserId: string, storeId: string, deviceId: string): Promise<void> {
+    await this.requireMember(actorUserId, storeId);
+    await this.catalog.revokeDevice(storeId, deviceId, new Date());
+  }
+
+  async members(actorUserId: string, storeId: string) {
+    await this.requireMember(actorUserId, storeId);
+    return this.catalog.listMembers(storeId);
+  }
+
+  async inviteMember(actorUserId: string, storeId: string, input: InviteMemberInput) {
+    await this.requireMember(actorUserId, storeId);
+    return this.catalog.inviteMember(storeId, actorUserId, input);
+  }
+
+  async commands(actorUserId: string, storeId: string) {
+    await this.requireMember(actorUserId, storeId);
+    return this.catalog.listCommands(storeId);
+  }
+
+  async backup(actorUserId: string, storeId: string) {
+    const snapshot = await this.snapshot(actorUserId, storeId);
+    return { version: 1, exportedAt: new Date().toISOString(), snapshot };
+  }
+
+  acceptBackup(actorUserId: string, storeId: string): Promise<void> {
+    return this.requireMember(actorUserId, storeId);
   }
 
   async submit(actorUserId: string, commands: IncomingCommand[]): Promise<StoredCommand[]> {

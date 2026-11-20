@@ -11,6 +11,7 @@ describe('expenses', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog: new CatalogService(new MemoryCatalogRepository()),
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},
@@ -24,9 +25,11 @@ describe('expenses', () => {
       headers: { authorization: 'Bearer owner' },
       payload: { id: storeId, name: 'Morning Star', deviceId: 'device-1' },
     });
-    const rentId = createdShop.json().categories.find(
-      (category: { kind: string; name: string }) => category.kind === 'EXPENSE' && category.name === 'Rent',
-    ).id as string;
+    const rentId = createdShop
+      .json()
+      .categories.find(
+        (category: { kind: string; name: string }) => category.kind === 'EXPENSE' && category.name === 'Rent',
+      ).id as string;
 
     const expenseId = randomUUID();
     const created = await send(app, storeId, 'expense.create', {
@@ -66,15 +69,24 @@ describe('expenses', () => {
     });
     assert.equal(zero.code, 'validation_error');
 
-    const voided = await send(app, storeId, 'expense.void', { id: expenseId, baseRevision: 1 });
+    const voided = await send(app, storeId, 'expense.void', {
+      id: expenseId,
+      baseRevision: 1,
+    });
     assert.equal(voided.expense?.status, 'VOID');
     assert.equal(voided.expense?.amountMinor, 50000);
     assert.equal(voided.expense?.revision, 2);
 
-    const again = await send(app, storeId, 'expense.void', { id: expenseId, baseRevision: 2 });
+    const again = await send(app, storeId, 'expense.void', {
+      id: expenseId,
+      baseRevision: 2,
+    });
     assert.equal(again.code, 'validation_error');
 
-    const removed = await send(app, storeId, 'expense.deactivate', { id: expenseId, baseRevision: 2 });
+    const removed = await send(app, storeId, 'expense.deactivate', {
+      id: expenseId,
+      baseRevision: 2,
+    });
     assert.equal(removed.expense?.isActive, false);
 
     const snapshot = await app.inject({
@@ -113,7 +125,9 @@ describe('expenses', () => {
 });
 
 async function send(
-  app: { inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }> },
+  app: {
+    inject: (input: object) => Promise<{ json: () => { results: Array<Record<string, unknown>> } }>;
+  },
   storeId: string,
   type: string,
   payload: Record<string, unknown>,

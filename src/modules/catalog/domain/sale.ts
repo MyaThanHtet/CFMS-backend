@@ -181,6 +181,12 @@ export function decideSaleCommand(input: {
   if (input.command.type === 'sale.deactivate') {
     return deactivateSale(input, payload);
   }
+  if (input.command.type === 'sale.restore') {
+    return restoreSale(input, payload);
+  }
+  if (input.command.type === 'sale.purge') {
+    return purgeSale(input, payload);
+  }
   return reject('validation_error', 'This sale change is not supported.');
 }
 
@@ -408,7 +414,16 @@ function deactivateSale(input: Parameters<typeof decideSaleCommand>[0], payload:
       revision: 1,
       createdAt: input.now,
     });
-    movements.push(stockMovement(input, newId(), item.id, qty, item.stockQty, sale.number));
+    const originals = reversedOriginals(input.movements, item.id, sale.number, 'SALE');
+    if (originals.length === 0) {
+      movements.push(stockMovement(input, newId(), item.id, qty, item.stockQty, sale.number));
+    } else {
+      for (const row of originals) {
+        if (!movements.some((existing) => existing.id === row.id)) {
+          movements.push(row);
+        }
+      }
+    }
   }
   const cash = input.cashMovements
     .filter((row) => row.sourceReference === sale.id && row.status === 'ACTIVE')
@@ -419,6 +434,79 @@ function deactivateSale(input: Parameters<typeof decideSaleCommand>[0], payload:
     movements,
     batches,
     cashMovements: cash,
+  });
+}
+
+function restoreSale(input: Parameters<typeof decideSaleCommand>[0], payload: Record<string, unknown>): SaleDecision {
+  const sale = input.sales.find((row) => row.id === text(payload.id)) ?? null;
+  if (!sale || sale.isActive) {
+    return reject('validation_error', 'This sale is not in the trash.');
+  }
+  const items = input.items.map((item) => ({ ...item }));
+  const batches = input.batches.map((batch) => ({ ...batch }));
+  const movements: MovementRecord[] = [];
+  for (const line of sale.lines) {
+    const qty = remainingQty(sale, line);
+    const item = items.find((row) => row.id === line.itemId);
+    if (!item || item.itemType !== 'PRODUCT' || item.stockQty === null || qty === 0) {
+      continue;
+    }
+    item.stockQty -= qty;
+    item.revision += 1;
+    item.updatedAt = input.now;
+    let left = qty;
+    for (const batch of batches) {
+      if (left === 0) {
+        break;
+      }
+      if (
+        batch.itemId !== item.id ||
+        batch.source !== 'RETURN' ||
+        batch.sourceReference !== sale.number ||
+        batch.remainingQty <= 0
+      ) {
+        continue;
+      }
+      const take = Math.min(left, batch.remainingQty);
+      batch.remainingQty -= take;
+      batch.revision += 1;
+      left -= take;
+    }
+    for (const row of input.movements) {
+      if (
+        row.itemId === item.id &&
+        row.reference === sale.number &&
+        row.movementType === 'SALE' &&
+        row.status === 'REVERSED' &&
+        !movements.some((existing) => existing.id === row.id)
+      ) {
+        movements.push({ ...row, status: 'ACTIVE', revision: row.revision + 1 });
+      }
+    }
+  }
+  const cash = input.cashMovements
+    .filter((row) => row.sourceReference === sale.id && row.status === 'REVERSED')
+    .map((row) => ({ ...row, status: 'ACTIVE' as const, revision: row.revision + 1 }));
+  return accept('sale.restored', {
+    sale: { ...sale, isActive: true, revision: sale.revision + 1, updatedAt: input.now },
+    items,
+    movements,
+    batches,
+    cashMovements: cash,
+  });
+}
+
+function purgeSale(input: Parameters<typeof decideSaleCommand>[0], payload: Record<string, unknown>): SaleDecision {
+  const sale = input.sales.find((row) => row.id === text(payload.id)) ?? null;
+  if (!sale || sale.isActive) {
+    return reject('validation_error', 'This sale is not in the trash.');
+  }
+  return accept('sale.purged', {
+    sale,
+    items: [],
+    movements: [],
+    batches: [],
+    cashMovements: [],
   });
 }
 
@@ -588,6 +676,23 @@ function cashIn(
       createdAt: input.now,
     },
   ];
+}
+
+function reversedOriginals(
+  movements: MovementRecord[],
+  itemId: string,
+  reference: string,
+  movementType: MovementRecord['movementType'],
+): MovementRecord[] {
+  return movements
+    .filter(
+      (row) =>
+        row.itemId === itemId &&
+        row.reference === reference &&
+        row.movementType === movementType &&
+        row.status === 'ACTIVE',
+    )
+    .map((row) => ({ ...row, status: 'REVERSED' as const, revision: row.revision + 1 }));
 }
 
 function stockMovement(

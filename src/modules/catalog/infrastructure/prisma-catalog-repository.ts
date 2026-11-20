@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import { Argon2PasswordHasher } from '../../auth/infrastructure/argon2-password-hasher.js';
+import type { PlatformService } from '../../platform/platform-service.js';
+import { CatalogError } from '../domain/catalog-error.js';
 import type { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
 import type {
   CatalogRepository,
@@ -31,7 +35,12 @@ import {
 } from '../domain/cash.js';
 import { decideExpenseCommand, toPublicExpense, type ExpenseRecord, type PublicExpense } from '../domain/expense.js';
 import { decideSaleCommand, toPublicSale, type PublicSale, type SaleRecord } from '../domain/sale.js';
-import { decidePurchaseCommand, toPublicPurchase, type PublicPurchase, type PurchaseRecord } from '../domain/purchase.js';
+import {
+  decidePurchaseCommand,
+  toPublicPurchase,
+  type PublicPurchase,
+  type PurchaseRecord,
+} from '../domain/purchase.js';
 import {
   decideShopCommand,
   seedCashMethod,
@@ -40,12 +49,7 @@ import {
   type PublicPaymentMethod,
   type PublicStore,
 } from '../domain/shop-settings.js';
-import {
-  decideContactCommand,
-  toPublicContact,
-  type ContactRecord,
-  type PublicContact,
-} from '../domain/contact.js';
+import { decideContactCommand, toPublicContact, type ContactRecord, type PublicContact } from '../domain/contact.js';
 import {
   decideItemCommand,
   toPublicBatch,
@@ -63,7 +67,10 @@ import {
 } from '../domain/item.js';
 
 export class PrismaCatalogRepository implements CatalogRepository {
-  constructor(private readonly prisma: PrismaClient) {}
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly platform?: PlatformService,
+  ) {}
 
   async findStore(id: string): Promise<StoreRecord | null> {
     const store = await this.prisma.store.findUnique({ where: { id } });
@@ -86,13 +93,20 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   async createStore(input: CreateStoreInput, now: Date): Promise<StoreSnapshot> {
-    const seeded = seedCategories({
-      storeId: input.id,
-      actorUserId: input.actorUserId,
-      deviceId: input.deviceId,
-      now,
-    });
+    const seeded =
+      input.seedDefaults === false
+        ? []
+        : seedCategories({
+            storeId: input.id,
+            actorUserId: input.actorUserId,
+            deviceId: input.deviceId,
+            now,
+          });
     await this.prisma.$transaction(async (tx) => {
+      if (this.platform) {
+        await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorUserId} FOR UPDATE`;
+        await this.platform.requireQuota(tx, input.actorUserId, 'shops');
+      }
       await tx.store.create({
         data: {
           id: input.id,
@@ -108,7 +122,12 @@ export class PrismaCatalogRepository implements CatalogRepository {
         },
       });
       await tx.storeMember.create({
-        data: { storeId: input.id, userId: input.actorUserId, role: 'OWNER', createdAt: now },
+        data: {
+          storeId: input.id,
+          userId: input.actorUserId,
+          role: 'OWNER',
+          createdAt: now,
+        },
       });
       await tx.category.createMany({
         data: seeded.map(categoryData),
@@ -125,43 +144,53 @@ export class PrismaCatalogRepository implements CatalogRepository {
           createdAt: now,
         })),
       });
-      const drawer = seedCashDrawer({
-        storeId: input.id,
-        actorUserId: input.actorUserId,
-        deviceId: input.deviceId,
-        now,
-      });
-      await tx.cashAccount.create({ data: cashAccountData(drawer.account) });
-      await tx.cashMovement.create({ data: cashMovementData(drawer.movement) });
-      const cashMethod = seedCashMethod(input.id, drawer.account.id, now);
-      await tx.paymentMethod.create({
-        data: {
-          id: cashMethod.id,
-          storeId: cashMethod.storeId,
-          name: cashMethod.name,
-          normalizedName: cashMethod.normalizedName,
-          accountId: cashMethod.accountId,
-          isDefault: cashMethod.isDefault,
-          isActive: cashMethod.isActive,
-          revision: cashMethod.revision,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-      await tx.changeRecord.create({
+      if (input.seedDefaults !== false) {
+        const drawer = seedCashDrawer({
+          storeId: input.id,
+          actorUserId: input.actorUserId,
+          deviceId: input.deviceId,
+          now,
+        });
+        await tx.cashAccount.create({ data: cashAccountData(drawer.account) });
+        await tx.cashMovement.create({
+          data: cashMovementData(drawer.movement),
+        });
+        const cashMethod = seedCashMethod(input.id, drawer.account.id, now);
+        await tx.paymentMethod.create({
+          data: {
+            id: cashMethod.id,
+            storeId: cashMethod.storeId,
+            name: cashMethod.name,
+            normalizedName: cashMethod.normalizedName,
+            accountId: cashMethod.accountId,
+            isDefault: cashMethod.isDefault,
+            isActive: cashMethod.isActive,
+            revision: cashMethod.revision,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        await tx.changeRecord.create({
+          data: {
+            storeId: input.id,
+            sequence: seeded.length + 1,
+            aggregateType: 'account',
+            aggregateId: drawer.account.id,
+            type: 'account.created',
+            commandId: `seed:${drawer.account.id}`,
+            payload: {
+              account: toPublicCashAccount(drawer.account),
+              cashMovements: [toPublicCashMovement(drawer.movement)],
+            },
+            createdAt: now,
+          },
+        });
+      }
+      await tx.storeSequence.create({
         data: {
           storeId: input.id,
-          sequence: seeded.length + 1,
-          aggregateType: 'account',
-          aggregateId: drawer.account.id,
-          type: 'account.created',
-          commandId: `seed:${drawer.account.id}`,
-          payload: { account: toPublicCashAccount(drawer.account), cashMovements: [toPublicCashMovement(drawer.movement)] },
-          createdAt: now,
+          lastSequence: seeded.length + (input.seedDefaults === false ? 0 : 1),
         },
-      });
-      await tx.storeSequence.create({
-        data: { storeId: input.id, lastSequence: seeded.length + 1 },
       });
     });
     return this.snapshot(input.id);
@@ -169,12 +198,35 @@ export class PrismaCatalogRepository implements CatalogRepository {
 
   async submitCommand(actorUserId: string, command: IncomingCommand, now: Date): Promise<StoredCommand> {
     return this.prisma.$transaction(async (tx) => {
-      const existing = await tx.commandRecord.findUnique({ where: { id: command.id } });
+      const existing = await tx.commandRecord.findUnique({
+        where: { id: command.id },
+      });
       if (existing) {
         return toStoredCommand(existing);
       }
-      const rows = await tx.category.findMany({ where: { storeId: command.storeId } });
-      const sequence = await tx.storeSequence.findUnique({ where: { storeId: command.storeId } });
+      if (this.platform) {
+        await tx.$queryRaw`SELECT id FROM stores WHERE id=${command.storeId} FOR UPDATE`;
+        const resources: Record<string, string> = {
+          'category.create': 'categories',
+          'contact.create': 'contacts',
+          'item.create': 'items',
+          'unit.create': 'units',
+          'expense.create': 'expenses',
+          'account.create': 'cash_accounts',
+          'sale.create': 'sales',
+          'purchase.create': 'purchases',
+          'paymentMethod.create': 'payment_methods',
+        };
+        const resource = resources[command.type];
+        if (resource) await this.platform.requireQuota(tx, actorUserId, resource, command.storeId);
+        else await this.platform.requireCloud(actorUserId, tx);
+      }
+      const rows = await tx.category.findMany({
+        where: { storeId: command.storeId },
+      });
+      const sequence = await tx.storeSequence.findUnique({
+        where: { storeId: command.storeId },
+      });
       if (command.type.startsWith('store.') || command.type.startsWith('paymentMethod.')) {
         const [store, methodRows, accountRows] = await Promise.all([
           tx.store.findUnique({ where: { id: command.storeId } }),
@@ -210,10 +262,16 @@ export class PrismaCatalogRepository implements CatalogRepository {
           });
           return missing;
         }
-        const accounts = accountRows.map((account) => ({ id: account.id, name: account.name, isActive: account.isActive }));
+        const accounts = accountRows.map((account) => ({
+          id: account.id,
+          name: account.name,
+          isActive: account.isActive,
+        }));
         return this.persistShop(tx, actorUserId, command, now, {
           store: toStore(store),
-          methods: methodRows.map((method) => toPaymentMethod(method, accounts.find((account) => account.id === method.accountId)?.name ?? '')),
+          methods: methodRows.map((method) =>
+            toPaymentMethod(method, accounts.find((account) => account.id === method.accountId)?.name ?? ''),
+          ),
           accounts,
           lastSequence: sequence?.lastSequence ?? 0,
         });
@@ -279,9 +337,13 @@ export class PrismaCatalogRepository implements CatalogRepository {
         const [accountRows, movementRows, reconciliationRows, expenseRows, contactRows, user] = await Promise.all([
           tx.cashAccount.findMany({ where: { storeId: command.storeId } }),
           tx.cashMovement.findMany({ where: { storeId: command.storeId } }),
-          tx.cashReconciliation.findMany({ where: { storeId: command.storeId } }),
+          tx.cashReconciliation.findMany({
+            where: { storeId: command.storeId },
+          }),
           tx.expense.findMany({ where: { storeId: command.storeId } }),
-          tx.contact.findMany({ where: { storeId: command.storeId, isActive: true } }),
+          tx.contact.findMany({
+            where: { storeId: command.storeId, isActive: true },
+          }),
           tx.user.findUnique({ where: { id: actorUserId } }),
         ]);
         return this.persistCash(tx, actorUserId, user?.name ?? actorUserId, command, now, {
@@ -310,7 +372,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
         });
       }
       if (command.type.startsWith('contact.')) {
-        const contactRows = await tx.contact.findMany({ where: { storeId: command.storeId } });
+        const contactRows = await tx.contact.findMany({
+          where: { storeId: command.storeId },
+        });
         return this.persistContact(tx, actorUserId, command, now, {
           contacts: contactRows.filter((row) => row.isActive).map(toContact),
           categories: rows.map(toCategory),
@@ -474,7 +538,13 @@ export class PrismaCatalogRepository implements CatalogRepository {
       lastSequence: number;
     },
   ): Promise<StoredCommand> {
-    const decision = decideCashCommand({ ...state, command, actorUserId, actorName, now });
+    const decision = decideCashCommand({
+      ...state,
+      command,
+      actorUserId,
+      actorName,
+      now,
+    });
     const accepted = decision.type === 'accept';
     const sequence = accepted ? state.lastSequence + 1 : null;
     const bundle = {
@@ -523,7 +593,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
       await tx.cashMovement.create({ data: cashMovementData(row) });
     }
     if (decision.reconciliation) {
-      await tx.cashReconciliation.create({ data: reconciliationData(decision.reconciliation) });
+      await tx.cashReconciliation.create({
+        data: reconciliationData(decision.reconciliation),
+      });
     }
     if (decision.expense) {
       await tx.expense.create({ data: expenseData(decision.expense) });
@@ -533,7 +605,8 @@ export class PrismaCatalogRepository implements CatalogRepository {
         storeId: command.storeId,
         sequence: sequence ?? state.lastSequence,
         aggregateType: 'account',
-        aggregateId: decision.account?.id ?? decision.movements[0]?.accountId ?? decision.reconciliation?.accountId ?? command.id,
+        aggregateId:
+          decision.account?.id ?? decision.movements[0]?.accountId ?? decision.reconciliation?.accountId ?? command.id,
         type: decision.changeType,
         commandId: command.id,
         payload: bundle,
@@ -676,7 +749,13 @@ export class PrismaCatalogRepository implements CatalogRepository {
       lastSequence: number;
     },
   ): Promise<StoredCommand> {
-    const decision = decideItemCommand({ ...state, command, actorUserId, actorName, now });
+    const decision = decideItemCommand({
+      ...state,
+      command,
+      actorUserId,
+      actorName,
+      now,
+    });
     const accepted = decision.type === 'accept';
     const sequence = accepted ? state.lastSequence + 1 : null;
     const bundle = {
@@ -732,7 +811,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
       });
       await tx.costBatch.deleteMany({ where: { itemId: decision.item.id } });
       if (decision.batches && decision.batches.length > 0) {
-        await tx.costBatch.createMany({ data: decision.batches.map(batchData) });
+        await tx.costBatch.createMany({
+          data: decision.batches.map(batchData),
+        });
       }
     }
     if (decision.movement) {
@@ -743,7 +824,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
         storeId: command.storeId,
         sequence: sequence ?? state.lastSequence,
         aggregateType: decision.unit && !decision.item ? 'unit' : 'item',
-        aggregateId: decision.unit && !decision.item ? decision.unit.id : decision.item?.id ?? command.id,
+        aggregateId: decision.unit && !decision.item ? decision.unit.id : (decision.item?.id ?? command.id),
         type: decision.changeType,
         commandId: command.id,
         payload: bundle,
@@ -773,7 +854,12 @@ export class PrismaCatalogRepository implements CatalogRepository {
       lastSequence: number;
     },
   ): Promise<StoredCommand> {
-    const decision = decidePurchaseCommand({ ...state, command, actorName, now });
+    const decision = decidePurchaseCommand({
+      ...state,
+      command,
+      actorName,
+      now,
+    });
     const accepted = decision.type === 'accept';
     const sequence = accepted ? state.lastSequence + 1 : null;
     const purchase = accepted ? toPublicPurchase(decision.effects.purchase) : null;
@@ -819,6 +905,26 @@ export class PrismaCatalogRepository implements CatalogRepository {
       return stored;
     }
     const row = decision.effects.purchase;
+    if (command.type === 'purchase.purge') {
+      await tx.purchaseDocument.deleteMany({ where: { id: row.id, storeId: row.storeId, isActive: false } });
+      await tx.changeRecord.create({
+        data: {
+          storeId: command.storeId,
+          sequence: sequence ?? state.lastSequence,
+          aggregateType: 'purchase',
+          aggregateId: row.id,
+          type: decision.changeType,
+          commandId: command.id,
+          payload: bundle,
+          createdAt: now,
+        },
+      });
+      await tx.storeSequence.update({
+        where: { storeId: command.storeId },
+        data: { lastSequence: sequence ?? state.lastSequence },
+      });
+      return stored;
+    }
     await tx.purchaseDocument.upsert({
       where: { id: row.id },
       create: {
@@ -861,7 +967,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
     for (const item of decision.effects.items) {
       await tx.item.update({
         where: { id: item.id },
-        data: { stockQty: item.stockQty, revision: item.revision, updatedAt: item.updatedAt },
+        data: {
+          stockQty: item.stockQty,
+          revision: item.revision,
+          updatedAt: item.updatedAt,
+        },
       });
     }
     for (const batch of decision.effects.batches) {
@@ -872,13 +982,17 @@ export class PrismaCatalogRepository implements CatalogRepository {
       });
     }
     for (const movement of decision.effects.movements) {
-      await tx.stockMovement.create({ data: movementData(movement) });
+      await upsertStockMovement(tx, movement);
     }
     for (const movement of decision.effects.cashMovements) {
       await tx.cashMovement.upsert({
         where: { id: movement.id },
         create: cashMovementData(movement),
-        update: { status: movement.status, amountMinor: movement.amountMinor, revision: movement.revision },
+        update: {
+          status: movement.status,
+          amountMinor: movement.amountMinor,
+          revision: movement.revision,
+        },
       });
     }
     await tx.changeRecord.create({
@@ -962,6 +1076,26 @@ export class PrismaCatalogRepository implements CatalogRepository {
       return stored;
     }
     const row = decision.effects.sale;
+    if (command.type === 'sale.purge') {
+      await tx.saleDocument.deleteMany({ where: { id: row.id, storeId: row.storeId, isActive: false } });
+      await tx.changeRecord.create({
+        data: {
+          storeId: command.storeId,
+          sequence: sequence ?? state.lastSequence,
+          aggregateType: 'sale',
+          aggregateId: row.id,
+          type: decision.changeType,
+          commandId: command.id,
+          payload: bundle,
+          createdAt: now,
+        },
+      });
+      await tx.storeSequence.update({
+        where: { storeId: command.storeId },
+        data: { lastSequence: sequence ?? state.lastSequence },
+      });
+      return stored;
+    }
     await tx.saleDocument.upsert({
       where: { id: row.id },
       create: {
@@ -1007,7 +1141,11 @@ export class PrismaCatalogRepository implements CatalogRepository {
     for (const item of decision.effects.items) {
       await tx.item.update({
         where: { id: item.id },
-        data: { stockQty: item.stockQty, revision: item.revision, updatedAt: item.updatedAt },
+        data: {
+          stockQty: item.stockQty,
+          revision: item.revision,
+          updatedAt: item.updatedAt,
+        },
       });
     }
     for (const batch of decision.effects.batches) {
@@ -1018,13 +1156,17 @@ export class PrismaCatalogRepository implements CatalogRepository {
       });
     }
     for (const movement of decision.effects.movements) {
-      await tx.stockMovement.create({ data: movementData(movement) });
+      await upsertStockMovement(tx, movement);
     }
     for (const movement of decision.effects.cashMovements) {
       await tx.cashMovement.upsert({
         where: { id: movement.id },
         create: cashMovementData(movement),
-        update: { status: movement.status, amountMinor: movement.amountMinor, revision: movement.revision },
+        update: {
+          status: movement.status,
+          amountMinor: movement.amountMinor,
+          revision: movement.revision,
+        },
       });
     }
     await tx.changeRecord.create({
@@ -1094,7 +1236,10 @@ export class PrismaCatalogRepository implements CatalogRepository {
         code: stored.code,
         message: stored.message,
         changeSequence: sequence,
-        resultShop: { store: stored.store, paymentMethods: stored.paymentMethods } as Prisma.InputJsonValue,
+        resultShop: {
+          store: stored.store,
+          paymentMethods: stored.paymentMethods,
+        } as Prisma.InputJsonValue,
         createdAt: now,
       },
     });
@@ -1118,7 +1263,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
       });
     }
     if (decision.methods) {
-      await tx.paymentMethod.deleteMany({ where: { storeId: command.storeId } });
+      await tx.paymentMethod.deleteMany({
+        where: { storeId: command.storeId },
+      });
       await tx.paymentMethod.createMany({
         data: decision.methods.map((method) => ({
           id: method.id,
@@ -1142,7 +1289,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
         aggregateId: decision.store?.id ?? command.storeId,
         type: decision.changeType,
         commandId: command.id,
-        payload: (decision.store ?? { paymentMethods: methods }) as Prisma.InputJsonValue,
+        payload: (decision.store ?? {
+          paymentMethods: methods,
+        }) as Prisma.InputJsonValue,
         createdAt: now,
       },
     });
@@ -1155,7 +1304,10 @@ export class PrismaCatalogRepository implements CatalogRepository {
 
   private async publicItems(storeId: string): Promise<PublicItem[]> {
     const [items, batches] = await Promise.all([
-      this.prisma.item.findMany({ where: { storeId, isActive: true }, orderBy: { name: 'asc' } }),
+      this.prisma.item.findMany({
+        where: { storeId, isActive: true },
+        orderBy: { name: 'asc' },
+      }),
       this.prisma.costBatch.findMany({ where: { storeId } }),
     ]);
     const records = batches.map(toBatch);
@@ -1163,13 +1315,20 @@ export class PrismaCatalogRepository implements CatalogRepository {
   }
 
   async snapshot(storeId: string): Promise<StoreSnapshot> {
-    const store = await this.prisma.store.findUniqueOrThrow({ where: { id: storeId } });
+    const store = await this.prisma.store.findUniqueOrThrow({
+      where: { id: storeId },
+    });
     const categories = await this.prisma.category.findMany({
       where: { storeId },
       orderBy: { sortOrder: 'asc' },
     });
-    const sequence = await this.prisma.storeSequence.findUnique({ where: { storeId } });
-    const methodRows = await this.prisma.paymentMethod.findMany({ where: { storeId, isActive: true }, orderBy: { name: 'asc' } });
+    const sequence = await this.prisma.storeSequence.findUnique({
+      where: { storeId },
+    });
+    const methodRows = await this.prisma.paymentMethod.findMany({
+      where: { storeId, isActive: true },
+      orderBy: { name: 'asc' },
+    });
     const accountNames = new Map(
       (await this.prisma.cashAccount.findMany({ where: { storeId } })).map((account) => [account.id, account.name]),
     );
@@ -1182,38 +1341,64 @@ export class PrismaCatalogRepository implements CatalogRepository {
           orderBy: { name: 'asc' },
         })
       ).map((contact) => toPublicContact(toContact(contact))),
-      units: (await this.prisma.unit.findMany({ where: { storeId }, orderBy: { name: 'asc' } })).map((unit) =>
-        toPublicUnit(toUnit(unit)),
-      ),
+      units: (
+        await this.prisma.unit.findMany({
+          where: { storeId },
+          orderBy: { name: 'asc' },
+        })
+      ).map((unit) => toPublicUnit(toUnit(unit))),
       items: await this.publicItems(storeId),
       movements: (
-        await this.prisma.stockMovement.findMany({ where: { storeId }, orderBy: { occurredAt: 'desc' } })
+        await this.prisma.stockMovement.findMany({
+          where: { storeId },
+          orderBy: { occurredAt: 'desc' },
+        })
       ).map((movement) => toPublicMovement(toMovement(movement))),
-      batches: (await this.prisma.costBatch.findMany({ where: { storeId }, orderBy: { receivedOn: 'asc' } })).map(
-        (batch) => toPublicBatch(toBatch(batch)),
-      ),
+      batches: (
+        await this.prisma.costBatch.findMany({
+          where: { storeId },
+          orderBy: { receivedOn: 'asc' },
+        })
+      ).map((batch) => toPublicBatch(toBatch(batch))),
       expenses: (
         await this.prisma.expense.findMany({
           where: { storeId, isActive: true },
           orderBy: [{ effectiveDate: 'desc' }, { title: 'asc' }],
         })
       ).map((expense) => toPublicExpense(toExpense(expense))),
-      accounts: (await this.prisma.cashAccount.findMany({ where: { storeId, isActive: true }, orderBy: { name: 'asc' } })).map(
-        (account) => toPublicCashAccount(toCashAccount(account)),
-      ),
-      cashMovements: (await this.prisma.cashMovement.findMany({ where: { storeId }, orderBy: { occurredAt: 'asc' } })).map(
-        (row) => toPublicCashMovement(toCashMovement(row)),
-      ),
-      reconciliations: (await this.prisma.cashReconciliation.findMany({ where: { storeId }, orderBy: { cutoffAt: 'desc' } })).map(
-        (row) => toPublicReconciliation(toReconciliation(row)),
-      ),
-      sales: (await this.prisma.saleDocument.findMany({ where: { storeId, isActive: true }, orderBy: { occurredAt: 'desc' } })).map(
-        (row) => toPublicSale(toSale(row)),
-      ),
+      accounts: (
+        await this.prisma.cashAccount.findMany({
+          where: { storeId, isActive: true },
+          orderBy: { name: 'asc' },
+        })
+      ).map((account) => toPublicCashAccount(toCashAccount(account))),
+      cashMovements: (
+        await this.prisma.cashMovement.findMany({
+          where: { storeId },
+          orderBy: { occurredAt: 'asc' },
+        })
+      ).map((row) => toPublicCashMovement(toCashMovement(row))),
+      reconciliations: (
+        await this.prisma.cashReconciliation.findMany({
+          where: { storeId },
+          orderBy: { cutoffAt: 'desc' },
+        })
+      ).map((row) => toPublicReconciliation(toReconciliation(row))),
+      sales: (
+        await this.prisma.saleDocument.findMany({
+          where: { storeId, isActive: true },
+          orderBy: { occurredAt: 'desc' },
+        })
+      ).map((row) => toPublicSale(toSale(row))),
       purchases: (
-        await this.prisma.purchaseDocument.findMany({ where: { storeId, isActive: true }, orderBy: { occurredAt: 'desc' } })
+        await this.prisma.purchaseDocument.findMany({
+          where: { storeId, isActive: true },
+          orderBy: { occurredAt: 'desc' },
+        })
       ).map((row) => toPublicPurchase(toPurchase(row))),
-      paymentMethods: methodRows.map((method) => toPublicPaymentMethod(toPaymentMethod(method, accountNames.get(method.accountId) ?? ''))),
+      paymentMethods: methodRows.map((method) =>
+        toPublicPaymentMethod(toPaymentMethod(method, accountNames.get(method.accountId) ?? '')),
+      ),
       lastSequence: sequence?.lastSequence ?? 0,
     };
   }
@@ -1223,7 +1408,9 @@ export class PrismaCatalogRepository implements CatalogRepository {
       where: { storeId, sequence: { gt: after } },
       orderBy: { sequence: 'asc' },
     });
-    const sequence = await this.prisma.storeSequence.findUnique({ where: { storeId } });
+    const sequence = await this.prisma.storeSequence.findUnique({
+      where: { storeId },
+    });
     return {
       changes: rows.map((row) => ({
         sequence: row.sequence,
@@ -1276,6 +1463,199 @@ export class PrismaCatalogRepository implements CatalogRepository {
       update: { lastSequence: sequence },
     });
   }
+
+  async listDevices(storeId: string) {
+    const members = await this.prisma.storeMember.findMany({
+      where: { storeId },
+      include: { user: { select: { id: true, name: true } } },
+    });
+    const names = new Map(members.map((member) => [member.userId, member.user.name]));
+    if (names.size === 0) {
+      return [];
+    }
+    const sessions = await this.prisma.session.findMany({
+      where: { userId: { in: [...names.keys()] }, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+    const seen = await this.prisma.commandRecord.groupBy({
+      by: ['deviceId'],
+      where: { storeId },
+      _max: { createdAt: true },
+    });
+    const lastCommand = new Map(seen.map((row) => [row.deviceId, row._max.createdAt]));
+    const grouped = new Map<string, { deviceId: string; deviceName: string; memberName: string; lastSeenAt: string }>();
+    for (const session of sessions) {
+      if (grouped.has(session.deviceId)) {
+        continue;
+      }
+      const commandSeen = lastCommand.get(session.deviceId);
+      const lastSeen = commandSeen && commandSeen > session.createdAt ? commandSeen : session.createdAt;
+      grouped.set(session.deviceId, {
+        deviceId: session.deviceId,
+        deviceName: session.deviceName ?? 'Device',
+        memberName: names.get(session.userId) ?? '',
+        lastSeenAt: lastSeen.toISOString(),
+      });
+    }
+    return [...grouped.values()];
+  }
+
+  async revokeDevice(storeId: string, deviceId: string, now: Date): Promise<void> {
+    const members = await this.prisma.storeMember.findMany({
+      where: { storeId },
+      select: { userId: true },
+    });
+    if (members.length === 0) {
+      return;
+    }
+    await this.prisma.session.updateMany({
+      where: {
+        deviceId,
+        userId: { in: members.map((member) => member.userId) },
+        revokedAt: null,
+      },
+      data: { revokedAt: now },
+    });
+  }
+
+  async listCommands(storeId: string) {
+    const rows = await this.prisma.commandRecord.findMany({
+      where: { storeId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const sessions = await this.prisma.session.findMany({
+      where: { deviceId: { in: [...new Set(rows.map((row) => row.deviceId))] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const names = new Map<string, string>();
+    for (const session of sessions) {
+      if (!names.has(session.deviceId)) {
+        names.set(session.deviceId, session.deviceName ?? 'Device');
+      }
+    }
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      deviceId: row.deviceId,
+      deviceName: names.get(row.deviceId) ?? 'Device',
+      status: row.status,
+      message: row.message,
+      createdAt: row.createdAt.toISOString(),
+      label: commandLabel(row.type, row.payload),
+    }));
+  }
+
+  async listMembers(storeId: string) {
+    const rows = await this.prisma.storeMember.findMany({
+      where: { storeId },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const rank = { OWNER: 0, MANAGER: 1, CASHIER: 2 };
+    return rows
+      .map((row) => ({
+        userId: row.user.id,
+        name: row.user.name,
+        email: row.user.email,
+        role: memberRole(row.role),
+        status: 'ACTIVE' as const,
+      }))
+      .sort((left, right) => rank[left.role] - rank[right.role]);
+  }
+
+  async inviteMember(
+    storeId: string,
+    actorUserId: string,
+    input: { email: string; role: 'MANAGER' | 'CASHIER'; password: string },
+  ) {
+    const actor = await this.prisma.storeMember.findUnique({
+      where: { storeId_userId: { storeId, userId: actorUserId } },
+    });
+    if (!actor || actor.role !== 'OWNER') {
+      throw new CatalogError('forbidden', 'Only the owner can invite a member.', 403);
+    }
+    const email = input.email.trim().toLowerCase();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      const membership = await this.prisma.storeMember.findUnique({
+        where: { storeId_userId: { storeId, userId: existing.id } },
+      });
+      if (membership) {
+        throw new CatalogError('validation_error', 'This person is already on the team.', 400);
+      }
+    }
+    const passwordHash = await new Argon2PasswordHasher().hash(input.password);
+    const user = existing
+      ? await this.prisma.user.update({
+          where: { id: existing.id },
+          data: { passwordHash },
+        })
+      : await this.prisma.user.create({
+          data: {
+            id: randomUUID(),
+            email,
+            name: nameFromEmail(email),
+            passwordHash,
+          },
+        });
+    await this.prisma.storeMember.create({
+      data: { storeId, userId: user.id, role: input.role },
+    });
+    return {
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: input.role,
+      status: 'ACTIVE' as const,
+    };
+  }
+}
+
+function memberRole(value: string): 'OWNER' | 'MANAGER' | 'CASHIER' {
+  if (value === 'MANAGER' || value === 'CASHIER') {
+    return value;
+  }
+  return 'OWNER';
+}
+
+function nameFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? email;
+  const name = local
+    .split(/[._-]+/)
+    .filter((part) => part.length > 0)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  return name.length > 0 ? name : email;
+}
+
+function commandLabel(type: string, payload: unknown): string {
+  const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
+  const number = typeof record.number === 'string' ? record.number : '';
+  const title = typeof record.title === 'string' ? record.title : '';
+  const name = typeof record.name === 'string' ? record.name : '';
+  if (type.startsWith('sale')) {
+    return `Sale ${number}`.trim();
+  }
+  if (type.startsWith('purchase')) {
+    return `Purchase ${number}`.trim();
+  }
+  if (type.startsWith('expense')) {
+    return `Expense ${title || name}`.trim();
+  }
+  if (type.startsWith('item')) {
+    return `Item ${name}`.trim();
+  }
+  if (type.startsWith('contact')) {
+    return `Contact ${name}`.trim();
+  }
+  if (type.startsWith('category')) {
+    return `Category ${name}`.trim();
+  }
+  if (type.startsWith('cash') || type.startsWith('payment')) {
+    return `Cash ${title || name}`.trim();
+  }
+  return type;
 }
 
 function changeType(value: string): ChangeEntry['aggregateType'] {
@@ -1396,7 +1776,13 @@ function toPaymentMethod(
 }
 
 function isPublicStore(value: Prisma.JsonValue | null): value is PublicStore {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && typeof value.id === 'string' && typeof value.revision === 'number';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof value.id === 'string' &&
+    typeof value.revision === 'number'
+  );
 }
 
 function paymentMethodList(value: Prisma.JsonValue | null): PublicPaymentMethod[] | null {
@@ -1517,7 +1903,10 @@ function toStoredCommand(row: {
   };
 }
 
-function shopBundle(value: Prisma.JsonValue | null): { store: PublicStore | null; paymentMethods: PublicPaymentMethod[] | null } {
+function shopBundle(value: Prisma.JsonValue | null): {
+  store: PublicStore | null;
+  paymentMethods: PublicPaymentMethod[] | null;
+} {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { store: null, paymentMethods: null };
   }
@@ -1535,7 +1924,12 @@ function purchaseBundle(value: Prisma.JsonValue | null): {
   movement: PublicMovement | null;
 } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { purchase: null, batches: null, cashMovements: null, movement: null };
+    return {
+      purchase: null,
+      batches: null,
+      cashMovements: null,
+      movement: null,
+    };
   }
   const record = value as Record<string, Prisma.JsonValue>;
   return {
@@ -1587,7 +1981,12 @@ function cashBundle(value: Prisma.JsonValue | null): {
   expense: PublicExpense | null;
 } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return { account: null, cashMovements: null, reconciliation: null, expense: null };
+    return {
+      account: null,
+      cashMovements: null,
+      reconciliation: null,
+      expense: null,
+    };
   }
   const record = value as Record<string, Prisma.JsonValue | undefined>;
   const account = record.account ?? null;
@@ -1603,19 +2002,35 @@ function cashBundle(value: Prisma.JsonValue | null): {
 }
 
 function isCashAccount(value: Prisma.JsonValue | null): value is PublicCashAccount {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'accountType' in value && 'openingMinor' in value;
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'accountType' in value &&
+    'openingMinor' in value
+  );
 }
 
 function isCashMovement(value: Prisma.JsonValue): value is PublicCashMovement {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'direction' in value && 'source' in value;
+  return (
+    typeof value === 'object' && value !== null && !Array.isArray(value) && 'direction' in value && 'source' in value
+  );
 }
 
 function isReconciliation(value: Prisma.JsonValue | null): value is PublicReconciliation {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'countedMinor' in value && 'cutoffAt' in value;
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    'countedMinor' in value &&
+    'cutoffAt' in value
+  );
 }
 
 function isPublicExpense(value: Prisma.JsonValue | null): value is PublicExpense {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && 'amountMinor' in value && 'status' in value;
+  return (
+    typeof value === 'object' && value !== null && !Array.isArray(value) && 'amountMinor' in value && 'status' in value
+  );
 }
 
 function toExpense(row: {
@@ -1793,7 +2208,13 @@ function toCashMovement(row: {
 }
 
 function cashSource(value: string): CashMovementRecord['source'] {
-  if (value === 'INCOME' || value === 'EXPENSE' || value === 'TRANSFER' || value === 'WITHDRAWAL' || value === 'REFUND') {
+  if (
+    value === 'INCOME' ||
+    value === 'EXPENSE' ||
+    value === 'TRANSFER' ||
+    value === 'WITHDRAWAL' ||
+    value === 'REFUND'
+  ) {
     return value;
   }
   return 'OPENING';
@@ -2073,6 +2494,20 @@ function toMovement(row: {
         : 'ADJUSTMENT',
     status: row.status === 'REVERSED' ? 'REVERSED' : 'ACTIVE',
   };
+}
+
+async function upsertStockMovement(
+  tx: Prisma.TransactionClient,
+  movement: MovementRecord,
+): Promise<void> {
+  await tx.stockMovement.upsert({
+    where: { id: movement.id },
+    create: movementData(movement),
+    update: {
+      status: movement.status,
+      revision: movement.revision,
+    },
+  });
 }
 
 function movementData(movement: MovementRecord): Prisma.StockMovementCreateInput {

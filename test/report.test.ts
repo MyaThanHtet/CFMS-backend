@@ -35,8 +35,18 @@ describe('reports', () => {
         },
       ],
     };
-    const voided: SaleDocument = { ...today, id: 'sale-void', number: 'INV-001', status: 'VOID' };
-    const older: SaleDocument = { ...today, id: 'sale-old', number: 'INV-002', effectiveDate: '2026-11-01' };
+    const voided: SaleDocument = {
+      ...today,
+      id: 'sale-void',
+      number: 'INV-001',
+      status: 'VOID',
+    };
+    const older: SaleDocument = {
+      ...today,
+      id: 'sale-old',
+      number: 'INV-002',
+      effectiveDate: '2026-11-01',
+    };
     const reported = saleReport([today, voided, older], '2026-11-14', '2026-11-14', 'hla');
     assert.equal(reported.count, 1);
     assert.equal(reported.grossMinor, 50_000);
@@ -98,6 +108,7 @@ describe('reports', () => {
     const app = createApp(
       {
         checkHealth: new CheckHealth({ ping: async () => true }),
+        cloudAccess: { requireCloud: async () => {} },
         catalog: new CatalogService(new MemoryCatalogRepository()),
         accessTokens: { verify: async (token: string) => token },
         disconnect: async () => {},

@@ -263,6 +263,45 @@ export class MemoryCatalogRepository implements CatalogRepository {
     this.cursors.set(`${storeId}:${deviceId}`, sequence);
   }
 
+  async listDevices() {
+    return [];
+  }
+
+  async revokeDevice(): Promise<void> {}
+
+  async listMembers() {
+    return [];
+  }
+
+  async inviteMember(
+    _storeId: string,
+    _actorUserId: string,
+    input: { email: string; role: 'MANAGER' | 'CASHIER'; password: string },
+  ) {
+    return {
+      userId: input.email,
+      name: input.email,
+      email: input.email,
+      role: input.role,
+      status: 'ACTIVE' as const,
+    };
+  }
+
+  async listCommands(storeId: string) {
+    return [...this.commands.values()]
+      .filter((command) => command.storeId === storeId)
+      .map((command) => ({
+        id: command.id,
+        type: command.type,
+        deviceId: command.deviceId,
+        deviceName: 'Device',
+        status: command.status,
+        message: command.message,
+        createdAt: new Date(0).toISOString(),
+        label: command.type,
+      }));
+  }
+
   cursor(storeId: string, deviceId: string): number | undefined {
     return this.cursors.get(`${storeId}:${deviceId}`);
   }
@@ -519,7 +558,11 @@ export class MemoryCatalogRepository implements CatalogRepository {
     if (!accepted) {
       return stored;
     }
-    this.sales.set(decision.effects.sale.id, decision.effects.sale);
+    if (command.type === 'sale.purge') {
+      this.sales.delete(decision.effects.sale.id);
+    } else {
+      this.sales.set(decision.effects.sale.id, decision.effects.sale);
+    }
     for (const item of decision.effects.items) {
       this.items.set(item.id, item);
     }
@@ -585,7 +628,11 @@ export class MemoryCatalogRepository implements CatalogRepository {
     if (!accepted) {
       return stored;
     }
-    this.purchases.set(decision.effects.purchase.id, decision.effects.purchase);
+    if (command.type === 'purchase.purge') {
+      this.purchases.delete(decision.effects.purchase.id);
+    } else {
+      this.purchases.set(decision.effects.purchase.id, decision.effects.purchase);
+    }
     for (const item of decision.effects.items) {
       this.items.set(item.id, item);
     }

@@ -8,6 +8,7 @@ import { CatalogError } from '../domain/catalog-error.js';
 const idSchema = z.uuid();
 
 const createStoreSchema = z.object({
+  offlineBootstrap: z.boolean().optional(),
   id: idSchema,
   name: z.string().trim().min(1).max(120),
   address: z.string().trim().max(240).optional(),
@@ -48,10 +49,14 @@ const commandSchema = z.object({
     'sale.collect',
     'sale.return',
     'sale.deactivate',
+    'sale.restore',
+    'sale.purge',
     'purchase.create',
     'purchase.pay',
     'purchase.return',
     'purchase.deactivate',
+    'purchase.restore',
+    'purchase.purge',
     'store.profile',
     'store.tax',
     'paymentMethod.create',
@@ -96,6 +101,7 @@ export function registerCatalogRoutes(
     const email = parsed.data.email && parsed.data.email.length > 0 ? parsed.data.email : null;
     return send(reply, () =>
       catalog.createStore({
+        seedDefaults: parsed.data.offlineBootstrap !== true,
         id: parsed.data.id,
         name: parsed.data.name,
         address: emptyToNull(parsed.data.address),
@@ -151,9 +157,105 @@ export function registerCatalogRoutes(
       query.data.deviceId && query.data.ack !== undefined
         ? { deviceId: query.data.deviceId, sequence: query.data.ack }
         : undefined;
-    return send(reply, () =>
-      catalog.changes(actorUserId, params.data.storeId, query.data.after, acknowledgement),
-    );
+    return send(reply, () => catalog.changes(actorUserId, params.data.storeId, query.data.after, acknowledgement));
+  });
+
+  app.get('/v1/stores/:storeId/members', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This shop was not found.'));
+    }
+    return send(reply, () => catalog.members(actorUserId, params.data.storeId));
+  });
+
+  app.post('/v1/stores/:storeId/members', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    const body = z
+      .object({
+        email: z.string().trim().toLowerCase().pipe(z.email()),
+        role: z.enum(['MANAGER', 'CASHIER']),
+        password: z.string().min(8).max(80),
+      })
+      .safeParse(request.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send(errorBody('validation_error', 'Check the email, role, and temporary password.'));
+    }
+    return send(reply, () => catalog.inviteMember(actorUserId, params.data.storeId, body.data));
+  });
+
+  app.get('/v1/stores/:storeId/devices', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This shop was not found.'));
+    }
+    return send(reply, () => catalog.devices(actorUserId, params.data.storeId));
+  });
+
+  app.post('/v1/stores/:storeId/devices/:deviceId/revoke', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema, deviceId: idSchema }).safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This device was not found.'));
+    }
+    return send(reply, async () => {
+      await catalog.revokeDevice(actorUserId, params.data.storeId, params.data.deviceId);
+      return { revoked: true };
+    });
+  });
+
+  app.get('/v1/stores/:storeId/commands', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This shop was not found.'));
+    }
+    return send(reply, () => catalog.commands(actorUserId, params.data.storeId));
+  });
+
+  app.get('/v1/stores/:storeId/backup', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    if (!params.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This shop was not found.'));
+    }
+    return send(reply, () => catalog.backup(actorUserId, params.data.storeId));
+  });
+
+  app.post('/v1/stores/:storeId/backup', async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const params = z.object({ storeId: idSchema }).safeParse(request.params);
+    const body = z.object({ version: z.literal(1) }).safeParse(request.body);
+    if (!params.success || !body.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This backup file cannot be read.'));
+    }
+    return send(reply, async () => {
+      await catalog.acceptBackup(actorUserId, params.data.storeId);
+      return { accepted: true };
+    });
   });
 
   app.post('/v1/commands', async (request, reply) => {

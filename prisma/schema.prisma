@@ -13,8 +13,10 @@ model User {
   name          String
   passwordHash  String?
   googleSubject String?   @unique
+  bytecraftSubject String? @unique
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  platformBinding PlatformBinding?
   sessions      Session[]
   ownedStores   Store[]       @relation("StoreOwner")
   memberships   StoreMember[]
@@ -454,4 +456,32 @@ model SyncCursor {
 
   @@id([storeId, deviceId])
   @@map("sync_cursors")
+}
+
+model PlatformBinding {
+  userId String @id
+  platformUserId String
+  tenantId String @unique
+  clientId String
+  createdAt DateTime @default(now())
+  user User @relation(fields:[userId], references:[id], onDelete:Restrict)
+  @@map("platform_bindings")
+}
+model PlatformSubscription {
+  tenantId String @id
+  status String
+  expiresAt DateTime?
+  graceUntil DateTime?
+  planCode String
+  planName String
+  entitlements Json
+  version Int
+  cancelAtPeriodEnd Boolean @default(false)
+  updatedAt DateTime @updatedAt
+  @@map("platform_subscriptions")
+}
+model PlatformWebhookEvent {
+  eventId String @id
+  receivedAt DateTime @default(now())
+  @@map("platform_webhook_events")
 }
