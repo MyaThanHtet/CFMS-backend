@@ -3,6 +3,7 @@ import type { PublicContact } from '../domain/contact.js';
 import type { PublicCashAccount, PublicCashMovement, PublicReconciliation } from '../domain/cash.js';
 import type { PublicExpense } from '../domain/expense.js';
 import type { PublicBatch, PublicItem, PublicMovement, PublicUnit } from '../domain/item.js';
+import type { PublicHeldSale } from '../domain/held-sale.js';
 import type { PublicSale } from '../domain/sale.js';
 import type { PublicPurchase } from '../domain/purchase.js';
 import type { PublicPaymentMethod, PublicStore } from '../domain/shop-settings.js';
@@ -24,6 +25,7 @@ export type StoreSnapshot = {
   cashMovements: PublicCashMovement[];
   reconciliations: PublicReconciliation[];
   sales: PublicSale[];
+  heldSales: PublicHeldSale[];
   purchases: PublicPurchase[];
   paymentMethods: PublicPaymentMethod[];
   lastSequence: number;
@@ -44,7 +46,7 @@ export type ChangeEntry = {
   sequence: number;
   storeId: string;
   aggregateType:
-    'category' | 'contact' | 'unit' | 'item' | 'expense' | 'account' | 'sale' | 'purchase' | 'store' | 'paymentMethod';
+    'category' | 'contact' | 'unit' | 'item' | 'expense' | 'account' | 'sale' | 'heldSale' | 'purchase' | 'store' | 'paymentMethod';
   aggregateId: string;
   type: string;
   commandId: string;
@@ -59,6 +61,7 @@ export type ChangeEntry = {
   cashMovements?: PublicCashMovement[] | null;
   reconciliation?: PublicReconciliation | null;
   sale?: PublicSale | null;
+  heldSale?: PublicHeldSale | null;
   purchase?: PublicPurchase | null;
   store?: PublicStore | null;
   paymentMethods?: PublicPaymentMethod[] | null;

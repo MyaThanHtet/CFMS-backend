@@ -1,5 +1,6 @@
 import { newId } from '../../auth/application/token.js';
 import type { PublicContact } from './contact.js';
+import type { PublicHeldSale } from './held-sale.js';
 import type { PublicSale } from './sale.js';
 import type { PublicPurchase } from './purchase.js';
 import type { PublicPaymentMethod, PublicStore } from './shop-settings.js';
@@ -59,6 +60,7 @@ export type StoredCommand = {
   cashMovements?: PublicCashMovement[] | null;
   reconciliation?: PublicReconciliation | null;
   sale?: PublicSale | null;
+  heldSale?: PublicHeldSale | null;
   purchase?: PublicPurchase | null;
   store?: PublicStore | null;
   paymentMethods?: PublicPaymentMethod[] | null;

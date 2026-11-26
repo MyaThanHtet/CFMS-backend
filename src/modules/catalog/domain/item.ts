@@ -71,6 +71,7 @@ export type PublicItem = {
   purchaseCostMinor: number | null;
   stockQty: number | null;
   lowStockLevel: number | null;
+  quickSaleRank: number | null;
   fifoCostMinor: number | null;
   isActive: boolean;
   revision: number;
@@ -97,7 +98,7 @@ export type ItemDecision =
     }
   | { type: 'reject'; code: string; message: string };
 
-const itemCommands = ['unit.create', 'item.create', 'item.update', 'item.deactivate', 'item.adjust_stock'] as const;
+const itemCommands = ['unit.create', 'item.create', 'item.update', 'item.deactivate', 'item.adjust_stock', 'item.pin'] as const;
 
 export function toPublicUnit(unit: UnitRecord): PublicUnit {
   return {
@@ -125,6 +126,7 @@ export function toPublicItem(item: ItemRecord, batches: BatchRecord[]): PublicIt
     purchaseCostMinor: item.purchaseCostMinor,
     stockQty: item.stockQty,
     lowStockLevel: item.lowStockLevel,
+    quickSaleRank: item.quickSaleRank,
     fifoCostMinor: fifoCost(batches.filter((batch) => batch.itemId === item.id)),
     isActive: item.isActive,
     revision: item.revision,
@@ -209,6 +211,9 @@ export function decideItemCommand(input: {
   }
   if (input.command.type === 'item.update') {
     return decideUpdate(input, current, payload, rejected);
+  }
+  if (input.command.type === 'item.pin') {
+    return decidePin(input, current, payload, rejected);
   }
   return decideAdjust(input, current, payload, rejected);
 }
@@ -315,6 +320,7 @@ function decideCreate(
     purchaseCostMinor: null,
     stockQty: null,
     lowStockLevel: null,
+    quickSaleRank: null,
     isActive: true,
     revision: 1,
     createdBy: input.actorUserId,
@@ -456,6 +462,47 @@ function decideUpdate(
     }),
     movement: null,
     batches: input.batches.filter((batch) => batch.itemId === current.id),
+  };
+}
+
+function decidePin(
+  input: { items: ItemRecord[]; actorUserId: string; command: IncomingCommand; now: Date },
+  current: ItemRecord,
+  payload: Record<string, unknown>,
+  rejected: (code: string, message: string) => ItemDecision,
+): ItemDecision {
+  const pinned = payload.pinned === true;
+  if (!pinned) {
+    return {
+      type: 'accept',
+      changeType: 'item.updated',
+      item: touchItem(current, input, { quickSaleRank: null }),
+      movement: null,
+      batches: [],
+    };
+  }
+  if (current.quickSaleRank !== null) {
+    return {
+      type: 'accept',
+      changeType: 'item.updated',
+      item: current,
+      movement: null,
+      batches: [],
+    };
+  }
+  const peers = input.items.filter(
+    (item) => item.storeId === current.storeId && item.isActive && item.id !== current.id && item.quickSaleRank !== null,
+  );
+  if (peers.length >= 12) {
+    return rejected('validation_error', 'The quick sale row already has 12 items.');
+  }
+  const rank = peers.reduce((max, item) => Math.max(max, item.quickSaleRank ?? 0), 0) + 1;
+  return {
+    type: 'accept',
+    changeType: 'item.updated',
+    item: touchItem(current, input, { quickSaleRank: rank }),
+    movement: null,
+    batches: [],
   };
 }
 

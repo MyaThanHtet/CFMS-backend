@@ -9,6 +9,8 @@ import {
 import type { CashAccountRecord, CashMovementRecord, ReconciliationRecord } from '../domain/cash.js';
 import { decidePurchaseCommand, toPublicPurchase } from '../domain/purchase.js';
 import type { PurchaseRecord } from '../domain/purchase.js';
+import { decideHeldSale } from '../domain/held-sale.js';
+import type { PublicHeldSale } from '../domain/held-sale.js';
 import { decideSaleCommand, toPublicSale } from '../domain/sale.js';
 import type { SaleRecord } from '../domain/sale.js';
 import { decideExpenseCommand, toPublicExpense } from '../domain/expense.js';
@@ -37,6 +39,7 @@ import type {
 
 export class MemoryCatalogRepository implements CatalogRepository {
   private readonly stores = new Map<string, StoreRecord>();
+  private readonly heldSales = new Map<string, PublicHeldSale>();
   private readonly members = new Set<string>();
   private readonly categories = new Map<string, CategoryRecord>();
   private readonly contacts = new Map<string, ContactRecord>();
@@ -151,6 +154,9 @@ export class MemoryCatalogRepository implements CatalogRepository {
     if (command.type.startsWith('cash.') || command.type === 'account.create') {
       return this.submitCash(actorUserId, command, now);
     }
+    if (command.type.startsWith('heldSale.')) {
+      return this.submitHeld(actorUserId, command);
+    }
     if (command.type.startsWith('sale.')) {
       return this.submitSale(actorUserId, command, now);
     }
@@ -248,6 +254,7 @@ export class MemoryCatalogRepository implements CatalogRepository {
       cashMovements: this.cashMovementsFor(storeId).map(toPublicCashMovement),
       reconciliations: this.reconciliationsFor(storeId).map(toPublicReconciliation),
       sales: this.salesFor(storeId).map(toPublicSale),
+      heldSales: [...this.heldSales.values()].filter((row) => row.storeId === storeId && !row.removed),
       purchases: this.purchasesFor(storeId).map(toPublicPurchase),
       paymentMethods: this.methodsFor(storeId).map(toPublicPaymentMethod),
       lastSequence: this.sequences.get(storeId) ?? 0,
@@ -516,6 +523,50 @@ export class MemoryCatalogRepository implements CatalogRepository {
       cashMovements: stored.cashMovements,
       reconciliation: stored.reconciliation,
       expense: stored.expense,
+    });
+    this.changeLog.set(command.storeId, page);
+    this.sequences.set(command.storeId, sequence);
+    return stored;
+  }
+
+  private submitHeld(actorUserId: string, command: IncomingCommand): StoredCommand {
+    const decision = decideHeldSale({
+      held: [...this.heldSales.values()].filter((row) => row.storeId === command.storeId),
+      command,
+    });
+    const accepted = decision.type === 'accept';
+    const sequence = (this.sequences.get(command.storeId) ?? 0) + (accepted ? 1 : 0);
+    const stored: StoredCommand = {
+      id: command.id,
+      storeId: command.storeId,
+      deviceId: command.deviceId,
+      actorUserId,
+      type: command.type,
+      status: accepted ? 'accepted' : 'rejected',
+      code: decision.type === 'reject' ? decision.code : null,
+      message: decision.type === 'reject' ? decision.message : null,
+      changeSequence: accepted ? sequence : null,
+      category: null,
+      heldSale: accepted ? decision.held : null,
+    };
+    this.commands.set(command.id, stored);
+    if (!accepted) {
+      return stored;
+    }
+    if (decision.held.removed) {
+      this.heldSales.delete(decision.held.id);
+    } else {
+      this.heldSales.set(decision.held.id, decision.held);
+    }
+    const page = this.changeLog.get(command.storeId) ?? [];
+    page.push({
+      sequence,
+      storeId: command.storeId,
+      aggregateType: 'heldSale',
+      aggregateId: decision.held.id,
+      type: decision.changeType,
+      commandId: command.id,
+      heldSale: decision.held,
     });
     this.changeLog.set(command.storeId, page);
     this.sequences.set(command.storeId, sequence);

@@ -68,6 +68,7 @@ model Store {
   reconciliations CashReconciliation[]
   sales        SaleDocument[]
   purchases      PurchaseDocument[]
+  heldSales      HeldSale[]
   paymentMethods PaymentMethod[]
   commands       CommandRecord[]
   changes      ChangeRecord[]
@@ -201,6 +202,7 @@ model Item {
   purchaseCostMinor   Int?
   stockQty            Int?
   lowStockLevel       Int?
+  quickSaleRank       Int?
   isActive          Boolean  @default(true)
   revision          Int
   createdBy         String
@@ -372,6 +374,29 @@ model SaleDocument {
   @@map("sale_documents")
 }
 
+model HeldSale {
+  id             String   @id
+  storeId        String
+  name           String
+  contactName    String
+  wholesale      Boolean
+  discountMode   String
+  discountValue  Int
+  taxMode        String
+  taxValue       Int
+  deliveryMinor  Int
+  note           String   @default("")
+  lines          Json
+  revision       Int
+  removed        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  store          Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@index([storeId])
+  @@map("held_sales")
+}
+
 model PurchaseDocument {
   id               String   @id
   storeId          String
@@ -420,6 +445,7 @@ model CommandRecord {
   resultSale      Json?
   resultPurchase  Json?
   resultShop      Json?
+  resultHeld      Json?
   createdAt       DateTime @default(now())
   store           Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
 

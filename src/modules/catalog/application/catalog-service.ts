@@ -135,6 +135,7 @@ export function commandResponse(command: StoredCommand): {
   cashMovements: StoredCommand['cashMovements'];
   reconciliation: StoredCommand['reconciliation'];
   sale: StoredCommand['sale'];
+  heldSale: StoredCommand['heldSale'];
   purchase: StoredCommand['purchase'];
   store: StoredCommand['store'];
   paymentMethods: StoredCommand['paymentMethods'];
@@ -156,6 +157,7 @@ export function commandResponse(command: StoredCommand): {
     cashMovements: command.cashMovements ?? null,
     reconciliation: command.reconciliation ?? null,
     sale: command.sale ?? null,
+    heldSale: command.heldSale ?? null,
     purchase: command.purchase ?? null,
     store: command.store ?? null,
     paymentMethods: command.paymentMethods ?? null,

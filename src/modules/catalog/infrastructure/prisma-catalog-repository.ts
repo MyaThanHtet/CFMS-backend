@@ -34,6 +34,7 @@ import {
   type ReconciliationRecord,
 } from '../domain/cash.js';
 import { decideExpenseCommand, toPublicExpense, type ExpenseRecord, type PublicExpense } from '../domain/expense.js';
+import { decideHeldSale, type PublicHeldSale } from '../domain/held-sale.js';
 import { decideSaleCommand, toPublicSale, type PublicSale, type SaleRecord } from '../domain/sale.js';
 import {
   decidePurchaseCommand,
@@ -310,6 +311,16 @@ export class PrismaCatalogRepository implements CatalogRepository {
           movements: movementRows.map(toMovement),
           accounts: accountRows.map(toCashAccount),
           cashMovements: cashRows.map(toCashMovement),
+          lastSequence: sequence?.lastSequence ?? 0,
+        });
+      }
+      if (command.type.startsWith('heldSale.')) {
+        const [heldRows, sequence] = await Promise.all([
+          tx.heldSale.findMany({ where: { storeId: command.storeId, removed: false } }),
+          tx.storeSequence.findUnique({ where: { storeId: command.storeId } }),
+        ]);
+        return this.persistHeld(tx, actorUserId, command, now, {
+          held: heldRows.map(toHeldSale),
           lastSequence: sequence?.lastSequence ?? 0,
         });
       }
@@ -1014,6 +1025,78 @@ export class PrismaCatalogRepository implements CatalogRepository {
     return stored;
   }
 
+  private async persistHeld(
+    tx: Prisma.TransactionClient,
+    actorUserId: string,
+    command: IncomingCommand,
+    now: Date,
+    state: { held: PublicHeldSale[]; lastSequence: number },
+  ): Promise<StoredCommand> {
+    const decision = decideHeldSale({ held: state.held, command });
+    const accepted = decision.type === 'accept';
+    const sequence = accepted ? state.lastSequence + 1 : null;
+    const held = accepted ? decision.held : null;
+    const stored: StoredCommand = {
+      id: command.id,
+      storeId: command.storeId,
+      deviceId: command.deviceId,
+      actorUserId,
+      type: command.type,
+      status: accepted ? 'accepted' : 'rejected',
+      code: decision.type === 'reject' ? decision.code : null,
+      message: decision.type === 'reject' ? decision.message : null,
+      changeSequence: sequence,
+      category: null,
+      heldSale: held,
+    };
+    await tx.commandRecord.create({
+      data: {
+        id: stored.id,
+        storeId: stored.storeId,
+        deviceId: stored.deviceId,
+        actorUserId,
+        type: stored.type,
+        payload: command.payload as Prisma.InputJsonValue,
+        status: stored.status,
+        code: stored.code,
+        message: stored.message,
+        changeSequence: stored.changeSequence,
+        resultHeld: held ?? undefined,
+        createdAt: now,
+      },
+    });
+    if (!accepted || !held) {
+      return stored;
+    }
+    if (held.removed) {
+      await tx.heldSale.deleteMany({ where: { id: held.id, storeId: held.storeId } });
+    } else {
+      const data = heldData(held);
+      await tx.heldSale.upsert({
+        where: { id: held.id },
+        create: { id: held.id, store: { connect: { id: held.storeId } }, ...data },
+        update: data,
+      });
+    }
+    await tx.changeRecord.create({
+      data: {
+        storeId: command.storeId,
+        sequence: sequence ?? state.lastSequence,
+        aggregateType: 'heldSale',
+        aggregateId: held.id,
+        type: decision.changeType,
+        commandId: command.id,
+        payload: held as Prisma.InputJsonValue,
+        createdAt: now,
+      },
+    });
+    await tx.storeSequence.update({
+      where: { storeId: command.storeId },
+      data: { lastSequence: sequence ?? state.lastSequence },
+    });
+    return stored;
+  }
+
   private async persistSale(
     tx: Prisma.TransactionClient,
     actorUserId: string,
@@ -1390,6 +1473,12 @@ export class PrismaCatalogRepository implements CatalogRepository {
           orderBy: { occurredAt: 'desc' },
         })
       ).map((row) => toPublicSale(toSale(row))),
+      heldSales: (
+        await this.prisma.heldSale.findMany({
+          where: { storeId, removed: false },
+          orderBy: { updatedAt: 'desc' },
+        })
+      ).map(toHeldSale),
       purchases: (
         await this.prisma.purchaseDocument.findMany({
           where: { storeId, isActive: true },
@@ -1430,6 +1519,7 @@ export class PrismaCatalogRepository implements CatalogRepository {
         account: cashBundle(row.payload).account,
         reconciliation: cashBundle(row.payload).reconciliation,
         sale: row.aggregateType === 'sale' ? saleBundle(row.payload).sale : null,
+        heldSale: row.aggregateType === 'heldSale' ? toPublicHeld(row.payload) : null,
         purchase: row.aggregateType === 'purchase' ? purchaseBundle(row.payload).purchase : null,
         store: row.aggregateType === 'store' && isPublicStore(row.payload) ? row.payload : null,
         paymentMethods: row.aggregateType === 'paymentMethod' ? paymentMethodList(row.payload) : null,
@@ -1666,6 +1756,7 @@ function changeType(value: string): ChangeEntry['aggregateType'] {
     value === 'expense' ||
     value === 'account' ||
     value === 'sale' ||
+    value === 'heldSale' ||
     value === 'purchase' ||
     value === 'store' ||
     value === 'paymentMethod'
@@ -1870,6 +1961,7 @@ function toStoredCommand(row: {
   resultExpense: Prisma.JsonValue | null;
   resultCash: Prisma.JsonValue | null;
   resultSale: Prisma.JsonValue | null;
+  resultHeld: Prisma.JsonValue | null;
   resultPurchase: Prisma.JsonValue | null;
   resultShop: Prisma.JsonValue | null;
 }): StoredCommand {
@@ -1897,6 +1989,7 @@ function toStoredCommand(row: {
     cashMovements: cash.cashMovements,
     reconciliation: cash.reconciliation,
     sale: saleBundle(row.resultSale).sale,
+    heldSale: toPublicHeld(row.resultHeld),
     purchase: purchaseBundle(row.resultPurchase).purchase,
     store: shop.store,
     paymentMethods: shop.paymentMethods,
@@ -2417,6 +2510,99 @@ function unitData(unit: UnitRecord): Prisma.UnitCreateInput {
   };
 }
 
+function toHeldSale(row: {
+  id: string;
+  storeId: string;
+  name: string;
+  contactName: string;
+  wholesale: boolean;
+  discountMode: string;
+  discountValue: number;
+  taxMode: string;
+  taxValue: number;
+  deliveryMinor: number;
+  note: string;
+  lines: Prisma.JsonValue;
+  revision: number;
+  removed: boolean;
+}): PublicHeldSale {
+  const lines = Array.isArray(row.lines)
+    ? row.lines.flatMap((line) => {
+        if (!line || typeof line !== 'object' || Array.isArray(line)) {
+          return [];
+        }
+        const record = line as Record<string, unknown>;
+        if (
+          typeof record.itemId !== 'string' ||
+          typeof record.qty !== 'number' ||
+          typeof record.unitPriceMinor !== 'number'
+        ) {
+          return [];
+        }
+        return [{ itemId: record.itemId, qty: record.qty, unitPriceMinor: record.unitPriceMinor }];
+      })
+    : [];
+  return {
+    id: row.id,
+    storeId: row.storeId,
+    name: row.name,
+    contactName: row.contactName,
+    wholesale: row.wholesale,
+    discountMode: row.discountMode === 'PERCENT' ? 'PERCENT' : 'AMOUNT',
+    discountValue: row.discountValue,
+    taxMode: row.taxMode === 'PERCENT' ? 'PERCENT' : 'AMOUNT',
+    taxValue: row.taxValue,
+    deliveryMinor: row.deliveryMinor,
+    note: row.note,
+    lines,
+    revision: row.revision,
+    removed: row.removed,
+  };
+}
+
+function toPublicHeld(value: Prisma.JsonValue | null): PublicHeldSale | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== 'string' || typeof row.storeId !== 'string' || typeof row.name !== 'string') {
+    return null;
+  }
+  return toHeldSale({
+    id: row.id,
+    storeId: row.storeId,
+    name: row.name,
+    contactName: typeof row.contactName === 'string' ? row.contactName : '',
+    wholesale: row.wholesale === true,
+    discountMode: typeof row.discountMode === 'string' ? row.discountMode : 'AMOUNT',
+    discountValue: typeof row.discountValue === 'number' ? row.discountValue : 0,
+    taxMode: typeof row.taxMode === 'string' ? row.taxMode : 'AMOUNT',
+    taxValue: typeof row.taxValue === 'number' ? row.taxValue : 0,
+    deliveryMinor: typeof row.deliveryMinor === 'number' ? row.deliveryMinor : 0,
+    note: typeof row.note === 'string' ? row.note : '',
+    lines: (row.lines ?? []) as Prisma.JsonValue,
+    revision: typeof row.revision === 'number' ? row.revision : 1,
+    removed: row.removed === true,
+  });
+}
+
+function heldData(held: PublicHeldSale) {
+  return {
+    name: held.name,
+    contactName: held.contactName,
+    wholesale: held.wholesale,
+    discountMode: held.discountMode,
+    discountValue: held.discountValue,
+    taxMode: held.taxMode,
+    taxValue: held.taxValue,
+    deliveryMinor: held.deliveryMinor,
+    note: held.note,
+    lines: held.lines as Prisma.InputJsonValue,
+    revision: held.revision,
+    removed: held.removed,
+  };
+}
+
 function toItem(row: {
   id: string;
   storeId: string;
@@ -2434,6 +2620,7 @@ function toItem(row: {
   purchaseCostMinor: number | null;
   stockQty: number | null;
   lowStockLevel: number | null;
+  quickSaleRank: number | null;
   isActive: boolean;
   revision: number;
   createdBy: string;
@@ -2467,6 +2654,7 @@ function itemData(item: ItemRecord): Prisma.ItemCreateInput {
     purchaseCostMinor: item.purchaseCostMinor,
     stockQty: item.stockQty,
     lowStockLevel: item.lowStockLevel,
+    quickSaleRank: item.quickSaleRank,
     isActive: item.isActive,
     revision: item.revision,
     createdBy: item.createdBy,
