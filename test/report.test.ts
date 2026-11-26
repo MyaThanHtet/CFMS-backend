@@ -71,6 +71,7 @@ describe('reports', () => {
       paymentMethodName: 'Cash',
       effectiveDate: '2026-11-14',
       note: '',
+      receiptImage: '',
       status: 'PAID',
       actorName: 'Aung Min',
       isActive: true,

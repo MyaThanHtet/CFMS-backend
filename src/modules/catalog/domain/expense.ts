@@ -14,6 +14,7 @@ export type PublicExpense = {
   paymentMethodName: string;
   effectiveDate: string;
   note: string;
+  receiptImage: string;
   status: ExpenseStatus;
   actorName: string;
   isActive: boolean;
@@ -46,6 +47,7 @@ export function toPublicExpense(expense: ExpenseRecord): PublicExpense {
     paymentMethodName: expense.paymentMethodName,
     effectiveDate: expense.effectiveDate,
     note: expense.note,
+    receiptImage: expense.receiptImage,
     status: expense.status,
     actorName: expense.actorName,
     isActive: expense.isActive,
@@ -103,7 +105,8 @@ function createExpense(
     return reject('validation_error', 'Check the expense details.');
   }
   const fields = readFields(input.categories, payload);
-  if (fields === invalid) {
+  const receiptImage = imageOf(payload.receiptImage);
+  if (fields === invalid || receiptImage === invalid) {
     return reject('validation_error', 'Check the expense details.');
   }
   return {
@@ -113,6 +116,7 @@ function createExpense(
       id,
       storeId: input.command.storeId,
       ...fields,
+      receiptImage,
       status: 'PAID',
       actorName: input.actorName,
       isActive: true,
@@ -140,7 +144,9 @@ function updateExpense(
     return reject('validation_error', 'A void expense cannot be edited.');
   }
   const fields = readFields(input.categories, payload);
-  if (fields === invalid) {
+  const receiptImage =
+    payload.receiptImage === undefined ? current.receiptImage : imageOf(payload.receiptImage);
+  if (fields === invalid || receiptImage === invalid) {
     return reject('validation_error', 'Check the expense details.');
   }
   return {
@@ -149,6 +155,7 @@ function updateExpense(
     expense: {
       ...current,
       ...fields,
+      receiptImage,
       revision: current.revision + 1,
       updatedBy: input.actorUserId,
       deviceId: input.command.deviceId,
@@ -298,6 +305,16 @@ function noteOf(value: unknown): string | null | typeof invalid {
   }
   const note = value.trim().replace(/\s+/g, ' ');
   return note.length > 240 ? invalid : note;
+}
+
+function imageOf(value: unknown): string | typeof invalid {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  if (typeof value !== 'string' || value.length > 120000 || !/^[A-Za-z0-9+/=\s]+$/.test(value)) {
+    return invalid;
+  }
+  return value.replace(/\s+/g, '');
 }
 
 function clean(value: string | null, max: number): string | null {

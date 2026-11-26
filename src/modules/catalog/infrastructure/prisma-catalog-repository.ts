@@ -2043,8 +2043,9 @@ function toExpense(row: {
   accountName: string;
   paymentMethodName: string;
   effectiveDate: string;
-  note: string;
-  status: string;
+    note: string;
+    receiptImage?: string;
+    status: string;
   actorName: string;
   isActive: boolean;
   revision: number;
@@ -2065,6 +2066,7 @@ function toExpense(row: {
     paymentMethodName: row.paymentMethodName,
     effectiveDate: row.effectiveDate,
     note: row.note,
+    receiptImage: 'receiptImage' in row && typeof row.receiptImage === 'string' ? row.receiptImage : '',
     status: row.status === 'VOID' ? 'VOID' : 'PAID',
     actorName: row.actorName,
     isActive: row.isActive,
@@ -2089,6 +2091,7 @@ function expenseData(expense: ExpenseRecord): Prisma.ExpenseCreateInput {
     paymentMethodName: expense.paymentMethodName,
     effectiveDate: expense.effectiveDate,
     note: expense.note,
+    receiptImage: expense.receiptImage,
     status: expense.status,
     actorName: expense.actorName,
     isActive: expense.isActive,
@@ -2247,6 +2250,7 @@ function toContact(row: {
   phone: string;
   email: string;
   address: string;
+  creditLimitMinor?: number;
   openingReceivableMinor: number;
   openingPayableMinor: number;
   collectedMinor: number;
@@ -2277,6 +2281,7 @@ function toContact(row: {
     phone: row.phone,
     email: row.email,
     address: row.address,
+    creditLimitMinor: row.creditLimitMinor ?? 0,
     openingReceivableMinor: row.openingReceivableMinor,
     openingPayableMinor: row.openingPayableMinor,
     collectedMinor: row.collectedMinor,
@@ -2310,6 +2315,7 @@ function contactData(contact: ContactRecord): Prisma.ContactCreateInput {
     phone: contact.phone,
     email: contact.email,
     address: contact.address,
+    creditLimitMinor: contact.creditLimitMinor,
     openingReceivableMinor: contact.openingReceivableMinor,
     openingPayableMinor: contact.openingPayableMinor,
     collectedMinor: contact.collectedMinor,
@@ -2424,6 +2430,7 @@ function toItem(row: {
   categoryId: string | null;
   categoryName: string | null;
   salePriceMinor: number;
+  wholesalePriceMinor: number | null;
   purchaseCostMinor: number | null;
   stockQty: number | null;
   lowStockLevel: number | null;
@@ -2456,6 +2463,7 @@ function itemData(item: ItemRecord): Prisma.ItemCreateInput {
     categoryId: item.categoryId,
     categoryName: item.categoryName,
     salePriceMinor: item.salePriceMinor,
+    wholesalePriceMinor: item.wholesalePriceMinor,
     purchaseCostMinor: item.purchaseCostMinor,
     stockQty: item.stockQty,
     lowStockLevel: item.lowStockLevel,

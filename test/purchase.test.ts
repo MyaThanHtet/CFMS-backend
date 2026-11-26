@@ -246,6 +246,41 @@ describe('purchases', () => {
     assert.equal(movements[0].movementType, 'PURCHASE');
     assert.equal(movements[0].status, 'REVERSED');
     assert.equal(snapshot.json().items.find((item: { id: string }) => item.id === itemId).stockQty, 0);
+
+    const correctedId = randomUUID();
+    const corrected = await send(app, storeId, 'purchase.create', {
+      id: correctedId,
+      number: 'BILL-022',
+      supplierName: 'Daw Khin Wholesale',
+      effectiveDate: '2026-11-14',
+      discountMode: 'AMOUNT',
+      discountValue: 0,
+      taxMode: 'AMOUNT',
+      taxValue: 0,
+      shippingMinor: 0,
+      paidMinor: 0,
+      paymentMethodName: 'Cash',
+      accountName: 'Cash drawer',
+      note: '',
+      lines: [
+        {
+          id: randomUUID(),
+          itemId,
+          qty: 8,
+          unitCostMinor: 6500,
+          movementId: randomUUID(),
+          batchId: randomUUID(),
+        },
+      ],
+    });
+    assert.equal(corrected.code, null);
+    assert.equal(corrected.purchase?.netMinor, 52000);
+    const edited = await app.inject({
+      method: 'GET',
+      url: `/v1/stores/${storeId}/snapshot`,
+      headers: { authorization: 'Bearer owner' },
+    });
+    assert.equal(edited.json().items.find((item: { id: string }) => item.id === itemId).stockQty, 8);
   });
 });
 

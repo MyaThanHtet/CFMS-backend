@@ -67,6 +67,7 @@ describe('items', () => {
     });
     assert.equal(created.item.stockQty, 6);
     assert.equal(created.item.fifoCostMinor, 7000);
+    assert.equal(created.item.wholesalePriceMinor, null);
     assert.equal(created.batches.length, 1);
     assert.equal(created.movement?.quantityChange, 6);
 
@@ -136,6 +137,60 @@ describe('items', () => {
     });
     assert.equal(service.item.stockQty, null);
     assert.equal(service.item.fifoCostMinor, null);
+    assert.equal(service.item.wholesalePriceMinor, null);
+
+    const priced = await send(app, storeId, 'item.update', {
+      id: itemId,
+      baseRevision: 3,
+      itemType: 'PRODUCT',
+      name: 'Rice 5 kg',
+      sku: 'RICE-5',
+      unitId,
+      categoryId,
+      salePriceMinor: 8000,
+      wholesalePriceMinor: 6500,
+      purchaseCostMinor: 7000,
+      lowStockLevel: 5,
+    });
+    assert.equal(priced.item.wholesalePriceMinor, 6500);
+
+    const kept = await send(app, storeId, 'item.update', {
+      id: itemId,
+      baseRevision: 4,
+      itemType: 'PRODUCT',
+      name: 'Rice 5 kg',
+      sku: 'RICE-5',
+      unitId,
+      categoryId,
+      salePriceMinor: 8000,
+      purchaseCostMinor: 7000,
+      lowStockLevel: 5,
+    });
+    assert.equal(kept.item.wholesalePriceMinor, 6500);
+
+    const cleared = await send(app, storeId, 'item.update', {
+      id: itemId,
+      baseRevision: 5,
+      itemType: 'PRODUCT',
+      name: 'Rice 5 kg',
+      sku: 'RICE-5',
+      unitId,
+      categoryId,
+      salePriceMinor: 8000,
+      wholesalePriceMinor: null,
+      purchaseCostMinor: 7000,
+      lowStockLevel: 5,
+    });
+    assert.equal(cleared.item.wholesalePriceMinor, null);
+
+    const badWholesale = await send(app, storeId, 'item.create', {
+      id: randomUUID(),
+      itemType: 'SERVICE',
+      name: 'Bad wholesale',
+      salePriceMinor: 1000,
+      wholesalePriceMinor: -1,
+    });
+    assert.equal(badWholesale.code, 'validation_error');
 
     const outsider = await app.inject({
       method: 'POST',
@@ -177,7 +232,11 @@ async function send(
   return response.json().results[0] as {
     status: string;
     code: string | null;
-    item: { stockQty: number | null; fifoCostMinor: number | null };
+    item: {
+      stockQty: number | null;
+      fifoCostMinor: number | null;
+      wholesalePriceMinor: number | null;
+    };
     movement: { quantityChange: number } | null;
     batches: Array<{ remainingQty: number; unitCostMinor: number }>;
   };

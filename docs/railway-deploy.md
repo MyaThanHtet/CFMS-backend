@@ -19,11 +19,14 @@ BizKyat / CFMS API ကို Railway ပေါ်တင်ပြီး productio
 2. **New Project** ကို နှိပ်ပါ။
 3. Project အမည်ကို `cfms` လို မှတ်ထားပါ။ ByteCraft production service နဲ့ project တူစရာ မလိုပါ။
 
-## 2. PostgreSQL ထည့်ရန်
+## 2. CFMS အတွက် PostgreSQL သီးခြားထည့်ရန်
 
-1. Project ထဲမှာ **Create** → **Database** → **PostgreSQL** ကို ရွေးပါ။
-2. Database service ကို deploy ပြီးသည်အထိ စောင့်ပါ။
-3. ဒီ database ရဲ့ `DATABASE_URL` ကို နောက်အဆင့်မှာ API service က ကိုးကားပါမယ်။ Local `localhost:5434` URL ကို မသုံးပါနဲ့။
+ByteCraft project ထဲက Postgres ကို မသုံးပါနဲ့။ `${{Postgres.DATABASE_URL}}` က service အမည် `Postgres` ကို ညွှန်တာဖြစ်ပြီး၊ project ထဲမှာ ByteCraft database က အဲဒီအမည်နဲ့ ရှိနေရင် CFMS က ByteCraft database ထဲကို migration လိုက်လုပ်ပါတယ်။
+
+1. CFMS project ထဲမှာ **Create** → **Database** → **PostgreSQL** ကို ရွေးပါ။
+2. Database service အမည်ကို `cfms-postgres` လို့ ပြောင်းပါ။ ByteCraft ရဲ့ database အမည်နဲ့ မတူရပါဘူး။
+3. Database service ကို deploy ပြီးသည်အထိ စောင့်ပါ။
+4. နောက်အဆင့်မှာ ဒီ service ရဲ့ URL ကိုပဲ ကိုးကားပါမယ်။ Local `localhost:5434` URL ကို မသုံးပါနဲ့။
 
 ## 3. API service ကို GitHub ကနေ ချိတ်ရန်
 
@@ -48,7 +51,7 @@ API service → **Variables** ထဲမှာ ဒီတန်ဖိုးတွ�
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `HOST` | `0.0.0.0` |
-| `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| `DATABASE_URL` | `${{cfms-postgres.DATABASE_URL}}` |
 | `BYTECRAFT_ISSUER` | `https://bytecraft-platform-backend-production.up.railway.app` |
 | `BYTECRAFT_APP_CODE` | `cfms` |
 | `BYTECRAFT_ANDROID_CLIENT_ID` | production Android public client id |
@@ -58,7 +61,7 @@ API service → **Variables** ထဲမှာ ဒီတန်ဖိုးတွ�
 | `BYTECRAFT_WEBHOOK_CLIENT_ID` | webhook destination နဲ့ map ထားတဲ့ client id |
 | `BYTECRAFT_WEBHOOK_SECRET` | production webhook secret |
 
-`DATABASE_URL` ကို စာသားအဖြစ် ကူးမရေးဘဲ Postgres service variable ကို reference လုပ်ပါ။ Railway UI မှာ variable reference က `${{Postgres.DATABASE_URL}}` ပုံစံပါ။ Database service အမည်က `Postgres` မဟုတ်ရင် အဲဒီ service အမည်ကို သုံးပါ။
+`DATABASE_URL` ကို စာသားအဖြစ် ကူးမရေးဘဲ CFMS database service ကို reference လုပ်ပါ။ Service အမည် `cfms-postgres` ဆိုရင် `${{cfms-postgres.DATABASE_URL}}` ပါ။ Railway variable picker ထဲမှာ CFMS database ကိုပဲ ရွေးပါ။ ByteCraft backend က သုံးနေတဲ့ Postgres ကို မရွေးပါနဲ့။
 
 `BYTECRAFT_ISSUER` စည်းမျဉ်း:
 

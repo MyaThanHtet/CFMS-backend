@@ -531,6 +531,7 @@ function feeExpense(
     paymentMethodName: 'Cash',
     effectiveDate,
     note: '',
+    receiptImage: '',
     status: 'PAID',
     actorName: input.actorName,
     isActive: true,

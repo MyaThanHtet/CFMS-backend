@@ -67,6 +67,7 @@ export type PublicItem = {
   categoryId: string | null;
   categoryName: string | null;
   salePriceMinor: number;
+  wholesalePriceMinor: number | null;
   purchaseCostMinor: number | null;
   stockQty: number | null;
   lowStockLevel: number | null;
@@ -120,6 +121,7 @@ export function toPublicItem(item: ItemRecord, batches: BatchRecord[]): PublicIt
     categoryId: item.categoryId,
     categoryName: item.categoryName,
     salePriceMinor: item.salePriceMinor,
+    wholesalePriceMinor: item.wholesalePriceMinor,
     purchaseCostMinor: item.purchaseCostMinor,
     stockQty: item.stockQty,
     lowStockLevel: item.lowStockLevel,
@@ -291,6 +293,10 @@ function decideCreate(
   if (salePrice === null) {
     return rejected('validation_error', 'Enter the sale price in MMK.');
   }
+  const wholesale = wholesalePriceOf(payload.wholesalePriceMinor);
+  if (wholesale === invalid) {
+    return rejected('validation_error', 'Enter the wholesale price in MMK.');
+  }
   const now = input.now;
   const base: ItemRecord = {
     id,
@@ -305,6 +311,7 @@ function decideCreate(
     categoryId: category?.id ?? null,
     categoryName: category?.name ?? null,
     salePriceMinor: salePrice,
+    wholesalePriceMinor: wholesale,
     purchaseCostMinor: null,
     stockQty: null,
     lowStockLevel: null,
@@ -398,6 +405,13 @@ function decideUpdate(
   if (salePrice === null) {
     return rejected('validation_error', 'Enter the sale price in MMK.');
   }
+  const wholesale =
+    payload.wholesalePriceMinor === undefined
+      ? current.wholesalePriceMinor
+      : wholesalePriceOf(payload.wholesalePriceMinor);
+  if (wholesale === invalid) {
+    return rejected('validation_error', 'Enter the wholesale price in MMK.');
+  }
   if (current.itemType === 'SERVICE') {
     return {
       type: 'accept',
@@ -412,6 +426,7 @@ function decideUpdate(
         categoryId: category?.id ?? null,
         categoryName: category?.name ?? null,
         salePriceMinor: salePrice,
+        wholesalePriceMinor: wholesale,
       }),
       movement: null,
       batches: [],
@@ -435,6 +450,7 @@ function decideUpdate(
       categoryId: category?.id ?? null,
       categoryName: category?.name ?? null,
       salePriceMinor: salePrice,
+      wholesalePriceMinor: wholesale,
       purchaseCostMinor: cost,
       lowStockLevel: low,
     }),
@@ -649,6 +665,14 @@ function clean(value: string | null, max: number): string | null {
     return null;
   }
   return name;
+}
+
+function wholesalePriceOf(value: unknown): number | null | typeof invalid {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const price = minor(value);
+  return price === null ? invalid : price;
 }
 
 function minor(value: unknown): number | null {

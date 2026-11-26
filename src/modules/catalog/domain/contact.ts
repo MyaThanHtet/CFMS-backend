@@ -25,6 +25,7 @@ export type PublicContact = {
   phone: string;
   email: string;
   address: string;
+  creditLimitMinor: number;
   openingReceivableMinor: number;
   openingPayableMinor: number;
   collectedMinor: number;
@@ -79,6 +80,7 @@ export function toPublicContact(contact: ContactRecord): PublicContact {
     phone: contact.phone,
     email: contact.email,
     address: contact.address,
+    creditLimitMinor: contact.creditLimitMinor,
     openingReceivableMinor: contact.openingReceivableMinor,
     openingPayableMinor: contact.openingPayableMinor,
     collectedMinor: contact.collectedMinor,
@@ -172,7 +174,8 @@ function decideCreate(
   const phone = optionalText(payload.phone, 40);
   const email = optionalEmail(payload.email);
   const address = optionalText(payload.address, 240);
-  if (phone === invalid || email === invalid || address === invalid) {
+  const limit = creditLimitOf(payload.creditLimitMinor);
+  if (phone === invalid || email === invalid || address === invalid || limit === invalid) {
     return rejected('validation_error', 'Check the phone, email, and address.');
   }
   const now = input.now;
@@ -187,6 +190,7 @@ function decideCreate(
     phone: phone ?? '',
     email: email ?? '',
     address: address ?? '',
+    creditLimitMinor: limit,
     openingReceivableMinor: 0,
     openingPayableMinor: 0,
     collectedMinor: 0,
@@ -227,7 +231,9 @@ function decideUpdate(
   const phone = optionalText(payload.phone, 40);
   const email = optionalEmail(payload.email);
   const address = optionalText(payload.address, 240);
-  if (phone === invalid || email === invalid || address === invalid) {
+  const limit =
+    payload.creditLimitMinor === undefined ? current.creditLimitMinor : creditLimitOf(payload.creditLimitMinor);
+  if (phone === invalid || email === invalid || address === invalid || limit === invalid) {
     return rejected('validation_error', 'Check the phone, email, and address.');
   }
   return {
@@ -242,6 +248,7 @@ function decideUpdate(
       phone: phone ?? '',
       email: email ?? '',
       address: address ?? '',
+      creditLimitMinor: limit,
     }),
   };
 }
@@ -457,6 +464,16 @@ function dateOnly(value: unknown): string | null | typeof invalid {
   const day = Number(parts[2]);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return invalid;
+  }
+  return value;
+}
+
+function creditLimitOf(value: unknown): number | typeof invalid {
+  if (value === undefined || value === null || value === '') {
+    return 0;
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     return invalid;
   }
   return value;

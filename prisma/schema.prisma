@@ -141,6 +141,7 @@ model Contact {
   phone                   String   @default("")
   email                   String   @default("")
   address                 String   @default("")
+  creditLimitMinor        Int      @default(0)
   openingReceivableMinor  Int      @default(0)
   openingPayableMinor     Int      @default(0)
   collectedMinor          Int      @default(0)
@@ -195,10 +196,11 @@ model Item {
   unitName          String?
   categoryId        String?
   categoryName      String?
-  salePriceMinor    Int
-  purchaseCostMinor Int?
-  stockQty          Int?
-  lowStockLevel     Int?
+  salePriceMinor      Int
+  wholesalePriceMinor Int?
+  purchaseCostMinor   Int?
+  stockQty            Int?
+  lowStockLevel       Int?
   isActive          Boolean  @default(true)
   revision          Int
   createdBy         String
@@ -260,6 +262,7 @@ model Expense {
   paymentMethodName String
   effectiveDate     String
   note              String   @default("")
+  receiptImage      String   @default("")
   status            String
   actorName         String
   isActive          Boolean  @default(true)
