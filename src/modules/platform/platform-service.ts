@@ -167,6 +167,10 @@ export class PlatformService {
       throw new CatalogError('platform_owner_required', 'A ByteCraft tenant owner or administrator is required.', 403);
     const response = await this.read('/api/v1/subscriptions/me', token);
     const sub = response.subscription as Record<string, unknown> | null;
+    const listedPlan = sub?.plan as Record<string, unknown> | undefined;
+    const catalog = await this.catalogEntitlements(
+      typeof listedPlan?.code === 'string' ? listedPlan.code : '',
+    );
     await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM users WHERE id=${userId} FOR UPDATE`;
       const prior = await tx.platformBinding.findUnique({ where: { userId } });
@@ -203,12 +207,45 @@ export class PlatformService {
         graceUntil: sub?.graceUntil ? new Date(String(sub.graceUntil)) : null,
         planCode: String(plan?.code ?? 'free'),
         planName: String(plan?.name ?? plan?.code ?? 'Free'),
-        entitlements: mergeEntitlements(plan?.entitlements, sub?.entitlements) as Prisma.InputJsonObject,
+        entitlements: mergeEntitlements(
+          catalog,
+          mergeEntitlements(plan?.entitlements, sub?.entitlements),
+        ) as Prisma.InputJsonObject,
         version: Number(sub?.version ?? 0),
         cancelAtPeriodEnd: sub?.cancelAtPeriodEnd === true,
       });
     });
     return this.access(userId);
+  }
+  private catalogPlans = new Map<string, { at: number; entitlements: unknown }>();
+  private async catalogEntitlements(planCode: string): Promise<unknown> {
+    if (!planCode || !this.env.BYTECRAFT_ISSUER) return undefined;
+    const cached = this.catalogPlans.get(planCode);
+    if (cached && Date.now() - cached.at < 30_000) return cached.entitlements;
+    try {
+      const rows: unknown[] = [];
+      for (let page = 1; page <= 5; page++) {
+        const url = new URL('/api/v1/plans', this.env.BYTECRAFT_ISSUER);
+        url.searchParams.set('app', this.env.BYTECRAFT_APP_CODE);
+        url.searchParams.set('page', String(page));
+        url.searchParams.set('limit', '100');
+        const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(4000) });
+        if (!response.ok) return undefined;
+        const body = (await response.json()) as { data?: unknown; meta?: { totalPages?: unknown } };
+        if (Array.isArray(body.data)) rows.push(...body.data);
+        const pages = Number(body.meta?.totalPages ?? 1);
+        if (!Number.isFinite(pages) || page >= pages) break;
+      }
+      const match = rows.find(
+        (row): row is { entitlements?: unknown } =>
+          !!row && typeof row === 'object' && (row as { code?: unknown }).code === planCode,
+      );
+      const entitlements = match?.entitlements;
+      this.catalogPlans.set(planCode, { at: Date.now(), entitlements });
+      return entitlements;
+    } catch {
+      return undefined;
+    }
   }
   private async read(path: string, token: string): Promise<Record<string, unknown>> {
     let response: Response;
@@ -282,6 +319,7 @@ export class PlatformService {
       Array.isArray(data.entitlements)
     )
       throw new CatalogError('invalid_payload', 'Invalid subscription payload.', 400);
+    const catalog = await this.catalogEntitlements(String(data.plan_tier));
     await this.db.$transaction(async (tx) => {
       // Serialize event IDs as well as subscription versions so parallel delivery retries are safe.
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${body.event_id as string},780185))::text`;
@@ -301,7 +339,7 @@ export class PlatformService {
         graceUntil: data.grace_until ? new Date(String(data.grace_until)) : null,
         planCode: String(data.plan_tier),
         planName: prior && prior.planCode === data.plan_tier ? prior.planName : String(data.plan_tier),
-        entitlements: data.entitlements as Prisma.InputJsonObject,
+        entitlements: mergeEntitlements(catalog, data.entitlements) as Prisma.InputJsonObject,
         version: Number(data.version),
         cancelAtPeriodEnd: data.cancel_at_period_end === true,
       });

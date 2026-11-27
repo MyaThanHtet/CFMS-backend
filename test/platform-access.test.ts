@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { accessPolicy, type SubscriptionState } from '../src/modules/platform/access-policy.js';
+import { accessPolicy, mergeEntitlements, type SubscriptionState } from '../src/modules/platform/access-policy.js';
 import { createApp } from '../src/infrastructure/http/create-app.js';
 import { CheckHealth } from '../src/modules/health/application/check-health.js';
 import { CatalogService } from '../src/modules/catalog/application/catalog-service.js';
@@ -38,6 +38,15 @@ describe('ByteCraft subscription access', () => {
   });
   it('treats max_branches as the shop cap when max_shops is absent', () => {
     const access = accessPolicy({ ...paid, entitlements: { max_branches: 3, cloud_sync: true } }, now);
+    assert.equal(access.limits.max_shops, 3);
+    assert.equal(access.limits.max_branches, 3);
+  });
+  it('uses the live plan branch cap when the subscription snapshot still says one shop', () => {
+    const entitlements = mergeEntitlements(
+      { max_branches: 3, cloud_sync: true },
+      { max_shops: 1, cloud_sync: true },
+    );
+    const access = accessPolicy({ ...paid, entitlements }, now);
     assert.equal(access.limits.max_shops, 3);
     assert.equal(access.limits.max_branches, 3);
   });
