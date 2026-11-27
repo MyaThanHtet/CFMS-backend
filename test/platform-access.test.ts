@@ -36,6 +36,11 @@ describe('ByteCraft subscription access', () => {
     assert.equal(accessPolicy(paid, new Date('2027-01-01')).canSync, false);
     assert.equal(accessPolicy({ ...paid, status: 'suspended' }, now).canSync, false);
   });
+  it('treats max_branches as the shop cap when max_shops is absent', () => {
+    const access = accessPolicy({ ...paid, entitlements: { max_branches: 3, cloud_sync: true } }, now);
+    assert.equal(access.limits.max_shops, 3);
+    assert.equal(access.limits.max_branches, 3);
+  });
   it('honors explicit cloud entitlement denial', () => {
     assert.equal(accessPolicy({ ...paid, entitlements: { cloud_sync: false } }, now).canSync, false);
   });

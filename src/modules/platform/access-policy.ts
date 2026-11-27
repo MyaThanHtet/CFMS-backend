@@ -8,6 +8,9 @@ export type SubscriptionState = {
   version: number;
   cancelAtPeriodEnd: boolean;
 };
+function integerCap(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 export const FREE_LIMITS = {
   max_shops: 1,
   max_categories: 3,
@@ -33,8 +36,12 @@ export function accessPolicy(subscription: SubscriptionState | null, now = new D
     !!subscription && ['active', 'trial'].includes(subscription.status.toLowerCase()) && !!until && until > now;
   const limits: Record<string, number | null> = {};
   for (const [key, free] of Object.entries(FREE_LIMITS)) {
-    const value = entitlements[key];
-    limits[key] = paid ? (Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null) : free;
+    limits[key] = paid ? integerCap(entitlements[key]) : free;
+  }
+  if (paid) {
+    const branches = integerCap(entitlements.max_branches);
+    if (branches !== null) limits.max_branches = branches;
+    if (limits.max_shops === null) limits.max_shops = branches;
   }
   return {
     tier: paid ? subscription.planName || subscription.planCode : 'Free',
