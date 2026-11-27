@@ -5,7 +5,7 @@ import type { ExpenseRecord } from './expense.js';
 
 export const accountTypes = ['CASH', 'BANK', 'WALLET'] as const;
 export type AccountType = (typeof accountTypes)[number];
-export const cashSources = ['OPENING', 'INCOME', 'EXPENSE', 'TRANSFER', 'WITHDRAWAL', 'REFUND'] as const;
+export const cashSources = ['OPENING', 'INCOME', 'EXPENSE', 'TRANSFER', 'WITHDRAWAL', 'REFUND', 'SALE', 'PURCHASE'] as const;
 export type CashSource = (typeof cashSources)[number];
 
 export type PublicCashAccount = {

@@ -29,10 +29,14 @@ import {
 import type { BatchRecord, ItemRecord, MovementRecord, UnitRecord } from '../domain/item.js';
 import { decideShopCommand, seedCashMethod, toPublicPaymentMethod } from '../domain/shop-settings.js';
 import type { PaymentMethodRecord } from '../domain/shop-settings.js';
+import { parseImportedShop } from '../domain/import-backup.js';
+import { CatalogError } from '../domain/catalog-error.js';
 import type {
   CatalogRepository,
   ChangeEntry,
   CreateStoreInput,
+  ImportBackupInput,
+  ImportedShopRef,
   StoreRecord,
   StoreSnapshot,
 } from '../application/ports.js';
@@ -132,6 +136,33 @@ export class MemoryCatalogRepository implements CatalogRepository {
     this.changeLog.set(store.id, changes);
     this.sequences.set(store.id, changes.length);
     return this.snapshot(store.id);
+  }
+
+  async importBackup(input: ImportBackupInput, now: Date): Promise<ImportedShopRef> {
+    const shop = parseImportedShop(input.tables, { ...input, now });
+    const existing = this.stores.get(shop.store.id);
+    if (existing && existing.ownerId !== input.actorUserId) {
+      throw new CatalogError('store_taken', 'This shop already belongs to another account.', 409);
+    }
+    if (!existing) {
+      this.stores.set(shop.store.id, shop.store);
+      this.members.add(memberKey(shop.store.id, input.actorUserId));
+      for (const row of shop.categories) this.categories.set(row.id, row);
+      for (const row of shop.contacts) this.contacts.set(row.id, row);
+      for (const row of shop.units) this.units.set(row.id, row);
+      for (const row of shop.items) this.items.set(row.id, row);
+      for (const row of shop.movements) this.movements.set(row.id, row);
+      for (const row of shop.batches) this.batches.set(row.id, row);
+      for (const row of shop.expenses) this.expenses.set(row.id, row);
+      for (const row of shop.accounts) this.accounts.set(row.id, row);
+      for (const row of shop.cashMovements) this.cashMovements.set(row.id, row);
+      for (const row of shop.reconciliations) this.reconciliations.set(row.id, row);
+      for (const row of shop.sales) this.sales.set(row.id, row);
+      for (const row of shop.purchases) this.purchases.set(row.id, row);
+      for (const row of shop.paymentMethods) this.paymentMethods.set(row.id, row);
+      this.sequences.set(shop.store.id, 0);
+    }
+    return { storeId: shop.store.id, ids: shop.ids };
   }
 
   async submitCommand(actorUserId: string, command: IncomingCommand, now: Date): Promise<StoredCommand> {

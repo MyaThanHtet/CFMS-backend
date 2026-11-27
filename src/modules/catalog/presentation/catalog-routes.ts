@@ -92,6 +92,30 @@ export function registerCatalogRoutes(
     return reply.send({ stores });
   });
 
+  app.post('/v1/stores/import', { bodyLimit: 8 * 1024 * 1024 }, async (request, reply) => {
+    const actorUserId = await actor(tokens, request.headers.authorization, reply);
+    if (!actorUserId) {
+      return;
+    }
+    const parsed = z
+      .object({
+        version: z.literal(1),
+        deviceId: z.string().trim().min(1).max(128),
+        tables: z.record(z.string(), z.unknown()),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send(errorBody('validation_error', 'This backup file cannot be read.'));
+    }
+    return send(reply, () =>
+      catalog.importBackup({
+        actorUserId,
+        deviceId: parsed.data.deviceId,
+        tables: parsed.data.tables,
+      }),
+    );
+  });
+
   app.post('/v1/stores', async (request, reply) => {
     const actorUserId = await actor(tokens, request.headers.authorization, reply);
     if (!actorUserId) {

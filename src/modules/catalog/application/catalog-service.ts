@@ -3,7 +3,14 @@ import { cashFlow, itemReport, profitAndLoss, purchaseReport, saleReport, stockV
 import { toReportSale } from '../domain/sale.js';
 import { toReportPurchase } from '../domain/purchase.js';
 import type { IncomingCommand, StoredCommand } from '../domain/category.js';
-import type { CatalogRepository, CreateStoreInput, InviteMemberInput, StoreSnapshot } from './ports.js';
+import type {
+  CatalogRepository,
+  CreateStoreInput,
+  ImportBackupInput,
+  ImportedShopRef,
+  InviteMemberInput,
+  StoreSnapshot,
+} from './ports.js';
 
 export class CatalogService {
   constructor(private readonly catalog: CatalogRepository) {}
@@ -24,6 +31,10 @@ export class CatalogService {
       return this.catalog.snapshot(input.id);
     }
     return this.catalog.createStore(input, new Date());
+  }
+
+  importBackup(input: ImportBackupInput): Promise<ImportedShopRef> {
+    return this.catalog.importBackup(input, new Date());
   }
 
   async report(actorUserId: string, storeId: string, from: string, to: string) {

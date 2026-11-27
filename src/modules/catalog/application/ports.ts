@@ -31,6 +31,17 @@ export type StoreSnapshot = {
   lastSequence: number;
 };
 
+export type ImportBackupInput = {
+  actorUserId: string;
+  deviceId: string;
+  tables: unknown;
+};
+
+export type ImportedShopRef = {
+  storeId: string;
+  ids: Record<string, string>;
+};
+
 export type CreateStoreInput = {
   seedDefaults?: boolean;
   id: string;
@@ -77,6 +88,7 @@ export interface CatalogRepository {
   listOwnedStores(userId: string): Promise<OwnedStore[]>;
   isMember(storeId: string, userId: string): Promise<boolean>;
   createStore(input: CreateStoreInput, now: Date): Promise<StoreSnapshot>;
+  importBackup(input: ImportBackupInput, now: Date): Promise<ImportedShopRef>;
   submitCommand(actorUserId: string, command: IncomingCommand, now: Date): Promise<StoredCommand>;
   snapshot(storeId: string): Promise<StoreSnapshot>;
   changes(storeId: string, after: number): Promise<{ changes: ChangeEntry[]; lastSequence: number }>;

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Argon2PasswordHasher } from '../../auth/infrastructure/argon2-password-hasher.js';
 import type { PlatformService } from '../../platform/platform-service.js';
 import { CatalogError } from '../domain/catalog-error.js';
+import { parseImportedShop } from '../domain/import-backup.js';
 import type { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
 import type {
   CatalogRepository,
@@ -195,6 +196,136 @@ export class PrismaCatalogRepository implements CatalogRepository {
       });
     });
     return this.snapshot(input.id);
+  }
+
+  async importBackup(
+    input: { actorUserId: string; deviceId: string; tables: unknown },
+    now: Date,
+  ): Promise<{ storeId: string; ids: Record<string, string> }> {
+    const shop = parseImportedShop(input.tables, { ...input, now });
+    const existing = await this.findStore(shop.store.id);
+    if (existing) {
+      if (existing.ownerId !== input.actorUserId) {
+        throw new CatalogError('store_taken', 'This shop already belongs to another account.', 409);
+      }
+      return { storeId: shop.store.id, ids: shop.ids };
+    }
+    await this.prisma.$transaction(async (tx) => {
+      if (this.platform) {
+        await tx.$queryRaw`SELECT id FROM users WHERE id=${input.actorUserId} FOR UPDATE`;
+        await this.platform.requireQuota(tx, input.actorUserId, 'shops');
+      }
+      await tx.store.create({
+        data: {
+          id: shop.store.id,
+          name: shop.store.name,
+          address: shop.store.address,
+          phone: shop.store.phone,
+          email: shop.store.email,
+          currencyCode: shop.store.currencyCode,
+          currencySymbol: shop.store.currencySymbol,
+          taxName: shop.store.taxName,
+          taxRatePercent: shop.store.taxRatePercent,
+          timezone: shop.store.timezone,
+          revision: shop.store.revision,
+          ownerId: input.actorUserId,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      await tx.storeMember.create({
+        data: { storeId: shop.store.id, userId: input.actorUserId, role: 'OWNER', createdAt: now },
+      });
+      await tx.storeSequence.create({ data: { storeId: shop.store.id, lastSequence: 0 } });
+      if (shop.categories.length) await tx.category.createMany({ data: shop.categories });
+      if (shop.contacts.length) await tx.contact.createMany({ data: shop.contacts });
+      if (shop.units.length) await tx.unit.createMany({ data: shop.units });
+      if (shop.items.length) {
+        await tx.item.createMany({
+          data: shop.items.map((row) => ({ ...row, sku: row.sku ?? '' })),
+        });
+      }
+      if (shop.movements.length) await tx.stockMovement.createMany({ data: shop.movements });
+      if (shop.batches.length) await tx.costBatch.createMany({ data: shop.batches });
+      if (shop.expenses.length) await tx.expense.createMany({ data: shop.expenses });
+      if (shop.accounts.length) await tx.cashAccount.createMany({ data: shop.accounts });
+      if (shop.cashMovements.length) await tx.cashMovement.createMany({ data: shop.cashMovements });
+      if (shop.reconciliations.length) await tx.cashReconciliation.createMany({ data: shop.reconciliations });
+      if (shop.sales.length) {
+        await tx.saleDocument.createMany({
+          data: shop.sales.map((row) => ({
+            id: row.id,
+            storeId: row.storeId,
+            number: row.number,
+            normalizedNumber: row.normalizedNumber,
+            contactName: row.contactName,
+            effectiveDate: row.effectiveDate,
+            occurredAt: row.occurredAt,
+            grossMinor: row.grossMinor,
+            discountMinor: row.discountMinor,
+            taxMinor: row.taxMinor,
+            deliveryMinor: row.deliveryMinor,
+            netMinor: row.netMinor,
+            costMinor: row.costMinor,
+            receivedMinor: row.receivedMinor,
+            dueMinor: row.dueMinor,
+            note: row.note,
+            isActive: row.isActive,
+            revision: row.revision,
+            lines: row.lines,
+            payments: row.payments,
+            returns: row.returns,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          })),
+        });
+      }
+      if (shop.purchases.length) {
+        await tx.purchaseDocument.createMany({
+          data: shop.purchases.map((row) => ({
+            id: row.id,
+            storeId: row.storeId,
+            number: row.number,
+            normalizedNumber: row.normalizedNumber,
+            supplierName: row.supplierName,
+            effectiveDate: row.effectiveDate,
+            occurredAt: row.occurredAt,
+            grossMinor: row.grossMinor,
+            discountMinor: row.discountMinor,
+            taxMinor: row.taxMinor,
+            shippingMinor: row.shippingMinor,
+            netMinor: row.netMinor,
+            paidMinor: row.paidMinor,
+            dueMinor: row.dueMinor,
+            note: row.note,
+            isActive: row.isActive,
+            revision: row.revision,
+            lines: row.lines,
+            payments: row.payments,
+            returns: row.returns,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          })),
+        });
+      }
+      if (shop.paymentMethods.length) {
+        await tx.paymentMethod.createMany({
+          data: shop.paymentMethods.map((row) => ({
+            id: row.id,
+            storeId: row.storeId,
+            name: row.name,
+            normalizedName: row.normalizedName,
+            accountId: row.accountId,
+            isDefault: row.isDefault,
+            isActive: row.isActive,
+            revision: row.revision,
+            createdAt: row.createdAt,
+            updatedAt: row.updatedAt,
+          })),
+        });
+      }
+    });
+    return { storeId: shop.store.id, ids: shop.ids };
   }
 
   async submitCommand(actorUserId: string, command: IncomingCommand, now: Date): Promise<StoredCommand> {
@@ -2309,7 +2440,9 @@ function cashSource(value: string): CashMovementRecord['source'] {
     value === 'EXPENSE' ||
     value === 'TRANSFER' ||
     value === 'WITHDRAWAL' ||
-    value === 'REFUND'
+    value === 'REFUND' ||
+    value === 'SALE' ||
+    value === 'PURCHASE'
   ) {
     return value;
   }
