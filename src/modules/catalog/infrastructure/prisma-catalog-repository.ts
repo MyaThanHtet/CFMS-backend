@@ -3,6 +3,7 @@ import { Argon2PasswordHasher } from '../../auth/infrastructure/argon2-password-
 import type { PlatformService } from '../../platform/platform-service.js';
 import { CatalogError } from '../domain/catalog-error.js';
 import { parseImportedShop } from '../domain/import-backup.js';
+import { mergeShopDevices } from '../domain/devices.js';
 import type { Prisma, PrismaClient } from '../../../generated/prisma/client.js';
 import type {
   CatalogRepository,
@@ -1691,34 +1692,27 @@ export class PrismaCatalogRepository implements CatalogRepository {
       include: { user: { select: { id: true, name: true } } },
     });
     const names = new Map(members.map((member) => [member.userId, member.user.name]));
-    if (names.size === 0) {
-      return [];
-    }
-    const sessions = await this.prisma.session.findMany({
-      where: { userId: { in: [...names.keys()] }, revokedAt: null },
-      orderBy: { createdAt: 'desc' },
-    });
+    const owner = members.find((member) => member.role === 'OWNER') ?? members[0];
+    const sessions =
+      names.size === 0
+        ? []
+        : await this.prisma.session.findMany({
+            where: { userId: { in: [...names.keys()] }, revokedAt: null },
+            orderBy: { createdAt: 'desc' },
+          });
     const seen = await this.prisma.commandRecord.groupBy({
       by: ['deviceId'],
       where: { storeId },
       _max: { createdAt: true },
     });
-    const lastCommand = new Map(seen.map((row) => [row.deviceId, row._max.createdAt]));
-    const grouped = new Map<string, { deviceId: string; deviceName: string; memberName: string; lastSeenAt: string }>();
-    for (const session of sessions) {
-      if (grouped.has(session.deviceId)) {
-        continue;
-      }
-      const commandSeen = lastCommand.get(session.deviceId);
-      const lastSeen = commandSeen && commandSeen > session.createdAt ? commandSeen : session.createdAt;
-      grouped.set(session.deviceId, {
-        deviceId: session.deviceId,
-        deviceName: session.deviceName ?? 'Device',
-        memberName: names.get(session.userId) ?? '',
-        lastSeenAt: lastSeen.toISOString(),
-      });
-    }
-    return [...grouped.values()];
+    const cursors = await this.prisma.syncCursor.findMany({ where: { storeId } });
+    return mergeShopDevices({
+      sessions,
+      commands: seen.map((row) => ({ deviceId: row.deviceId, createdAt: row._max.createdAt })),
+      cursors,
+      names,
+      fallbackName: owner?.user.name ?? '',
+    });
   }
 
   async revokeDevice(storeId: string, deviceId: string, now: Date): Promise<void> {
