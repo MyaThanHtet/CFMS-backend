@@ -8,8 +8,23 @@ export type SubscriptionState = {
   version: number;
   cancelAtPeriodEnd: boolean;
 };
-function integerCap(value: unknown): number | null {
+export function integerCap(value: unknown): number | null {
+  if (typeof value === 'string' && value.trim() !== '') return integerCap(Number(value));
+  if (value && typeof value === 'object' && 'value' in value) return integerCap(value.value);
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+export function mergeEntitlements(plan: unknown, subscription: unknown) {
+  const record = (value: unknown) =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const fromPlan = record(plan);
+  const current = record(subscription);
+  const merged: Record<string, unknown> = { ...current, ...fromPlan };
+  for (const key of new Set([...Object.keys(fromPlan), ...Object.keys(current)])) {
+    const left = integerCap(fromPlan[key]);
+    const right = integerCap(current[key]);
+    if (left !== null && right !== null && key.startsWith('max_')) merged[key] = Math.max(left, right);
+  }
+  return merged;
 }
 export const FREE_LIMITS = {
   max_shops: 1,
@@ -40,8 +55,10 @@ export function accessPolicy(subscription: SubscriptionState | null, now = new D
   }
   if (paid) {
     const branches = integerCap(entitlements.max_branches);
+    const shops = integerCap(entitlements.max_shops);
     if (branches !== null) limits.max_branches = branches;
-    if (limits.max_shops === null) limits.max_shops = branches;
+    const caps = [shops, branches].filter((value) => value !== null);
+    limits.max_shops = caps.length === 0 ? null : Math.max(...caps);
   }
   return {
     tier: paid ? subscription.planName || subscription.planCode : 'Free',

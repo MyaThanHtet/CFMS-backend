@@ -41,6 +41,14 @@ describe('ByteCraft subscription access', () => {
     assert.equal(access.limits.max_shops, 3);
     assert.equal(access.limits.max_branches, 3);
   });
+  it('lets a branch cap of 3 override a leftover one-shop default', () => {
+    const access = accessPolicy(
+      { ...paid, entitlements: { max_shops: 1, max_branches: '3', cloud_sync: true } },
+      now,
+    );
+    assert.equal(access.limits.max_shops, 3);
+    assert.equal(access.limits.max_branches, 3);
+  });
   it('honors explicit cloud entitlement denial', () => {
     assert.equal(accessPolicy({ ...paid, entitlements: { cloud_sync: false } }, now).canSync, false);
   });

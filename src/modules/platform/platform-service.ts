@@ -3,7 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Env } from '../../config/env.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import { CatalogError } from '../catalog/domain/catalog-error.js';
-import { accessPolicy } from './access-policy.js';
+import { accessPolicy, mergeEntitlements } from './access-policy.js';
 
 type Projection = {
   tenantId: string;
@@ -203,7 +203,7 @@ export class PlatformService {
         graceUntil: sub?.graceUntil ? new Date(String(sub.graceUntil)) : null,
         planCode: String(plan?.code ?? 'free'),
         planName: String(plan?.name ?? plan?.code ?? 'Free'),
-        entitlements: (sub?.entitlements ?? {}) as Prisma.InputJsonObject,
+        entitlements: mergeEntitlements(plan?.entitlements, sub?.entitlements) as Prisma.InputJsonObject,
         version: Number(sub?.version ?? 0),
         cancelAtPeriodEnd: sub?.cancelAtPeriodEnd === true,
       });
